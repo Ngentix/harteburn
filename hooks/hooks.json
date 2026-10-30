@@ -1,0 +1,76 @@
+{
+  "description": "HarteBurn: the way of working and this repo's architecture brief (in up to three parts) in every conversation and every subagent; a one-line reminder per prompt; a ledger of every agent dispatch (tagged with the session's own objective, which ExitWorktree clears); the repo's disk steward after every Prover pass and before every gate, in this repo and every other repo the objective changed.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" ethos", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" handoff", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" brief-session 1 of 3", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" brief-session 2 of 3", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" brief-session 3 of 3", "timeout": 10 }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" brief-subagent 1 of 3", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" brief-subagent 2 of 3", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" brief-subagent 3 of 3", "timeout": 10 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" steward prover", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" ledger-stop", "timeout": 10 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" reminder", "timeout": 5 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "ArtifactData",
+        "hooks": [
+          { "type": "command", "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"permissionDecisionReason\":\"ArtifactData is always allowed: the board is written at every beat (jg, 2026-10-16)\"}}'", "timeout": 5 }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" steward gate", "timeout": 130 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" ledger", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" steward prover", "timeout": 10 }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit|Bash",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" touch", "timeout": 10 }
+        ]
+      },
+      {
+        "matcher": "ExitWorktree",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/redcell-hook.mjs\" session-clear", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

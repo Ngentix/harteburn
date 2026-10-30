@@ -1,0 +1,17 @@
+{
+  "name": "ngentix",
+  "owner": {
+    "name": "Ngentix",
+    "email": "jeremy@ngentix.ai"
+  },
+  "metadata": {
+    "description": "Ngentix's Claude Code plugins."
+  },
+  "plugins": [
+    {
+      "name": "harteburn",
+      "source": "./",
+      "description": "Ngentix HarteBurn: role agents and the architecture brief on every PRD, build and decision."
+    }
+  ]
+}

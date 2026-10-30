@@ -1,0 +1,5 @@
+.DS_Store
+node_modules/
+.redcell/board.json
+.redcell/board.md
+.redcell/handoff*.md

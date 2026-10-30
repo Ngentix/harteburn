@@ -1,0 +1,163 @@
+{
+ "_": "Word budgets (jg 2026-10-28). Each file a run loads: words is its budget, set at its count on 2026-10-28 and lowered after each tidy pass. Over budget is red in tests/budgets.test.mjs until trimmed, or a raise is added: {date, words, why, approved}. node scripts/budgets.mjs prints the counts.",
+ "files": {
+  "agents/architect.md": {
+   "words": 886,
+   "raises": [
+    {
+     "date": "2026-10-29",
+     "words": 1028,
+     "why": "each new screen is ruled at Ready, and a run reads only the piece pack and the files it cites (two 2026-10-28 product retros, ch ratified 2026-10-28)",
+     "approved": "ch"
+    }
+   ]
+  },
+  "agents/architecture-lead.md": {
+   "words": 694,
+   "raises": []
+  },
+  "agents/brief-compiler.md": {
+   "words": 672,
+   "raises": [
+    {
+     "date": "2026-10-28",
+     "words": 699,
+     "why": "the threat model carried under tenancy and security (rc-security piece 1)",
+     "approved": "jg 2026-10-28"
+    }
+   ]
+  },
+  "agents/security.md": {
+   "words": 630,
+   "raises": []
+  },
+  "agents/designer.md": {
+   "words": 512,
+   "raises": []
+  },
+  "agents/product.md": {
+   "words": 1201,
+   "raises": [
+    {
+     "date": "2026-10-29",
+     "words": 1296,
+     "why": "the state table has a row for each negative outcome the walkthrough names, and a run reads only the piece pack (two 2026-10-28 product retros, ch ratified 2026-10-28)",
+     "approved": "ch"
+    }
+   ]
+  },
+  "agents/prover.md": {
+   "words": 1312,
+   "raises": [
+    {
+     "date": "2026-10-28",
+     "words": 1325,
+     "why": "one rule: discard an earlier pass's leftovers in the warm worktree, never stash them; end each pass reset (Provers stashed 4 times on rc-disk)",
+     "approved": "jg"
+    },
+    {
+     "date": "2026-10-28",
+     "words": 1350,
+     "why": "an attack test for each abuse-case Done line (rc-security piece 2)",
+     "approved": "jg 2026-10-28"
+    },
+    {
+     "date": "2026-10-29",
+     "words": 1530,
+     "why": "required screen rows before Build, and a run reads only the piece pack (two 2026-10-28 product retros, ch ratified 2026-10-28)",
+     "approved": "ch"
+    }
+   ]
+  },
+  "bookends.md": {
+   "words": 175,
+   "raises": [
+    {
+     "date": "2026-10-28",
+     "words": 185,
+     "why": "the Security role at PIECE START and PIECE END (rc-security piece 1)",
+     "approved": "jg 2026-10-28"
+    }
+   ]
+  },
+  "ethos.md": {
+   "words": 473,
+   "raises": [
+    {
+     "date": "2026-10-28",
+     "words": 487,
+     "why": "the Security role's ROLES clause (rc-security piece 1)",
+     "approved": "jg 2026-10-28"
+    }
+   ]
+  },
+  "skills/brief/SKILL.md": {
+   "words": 239,
+   "raises": []
+  },
+  "skills/done/SKILL.md": {
+   "words": 355,
+   "raises": [
+    {
+     "date": "2026-10-29",
+     "words": 399,
+     "why": "Done evidence has one section per Done line, checked before Product is dispatched (a 2026-10-28 product retro, ch ratified 2026-10-28)",
+     "approved": "ch"
+    }
+   ]
+  },
+  "skills/frame/SKILL.md": {
+   "words": 1172,
+   "raises": [
+    {
+     "date": "2026-10-28",
+     "words": 1226,
+     "why": "Frame dispatches the Security role for abuse cases (rc-security piece 2)",
+     "approved": "jg 2026-10-28"
+    },
+    {
+     "date": "2026-10-29",
+     "words": 1371,
+     "why": "Frame checks the hooks are recording runs and sets the objective token budget (a 2026-10-28 product retro, ch ratified 2026-10-28)",
+     "approved": "ch"
+    },
+    {
+     "date": "2026-10-29",
+     "words": 1384,
+     "why": "a licensed board is also stored on the hosted board",
+     "approved": "ch"
+    }
+   ]
+  },
+  "skills/handoff/SKILL.md": {
+   "words": 313,
+   "raises": []
+  },
+  "skills/prd-panel/SKILL.md": {
+   "words": 430,
+   "raises": []
+  },
+  "skills/prove/SKILL.md": {
+   "words": 701,
+   "raises": [
+    {
+     "date": "2026-10-29",
+     "words": 831,
+     "why": "screen rows before Build, one piece pack per beat, and a re-pass on a smaller model (two 2026-10-28 product retros, ch ratified 2026-10-28)",
+     "approved": "ch"
+    }
+   ]
+  },
+  "skills/retro/SKILL.md": {
+   "words": 746,
+   "raises": [
+    {
+     "date": "2026-10-29",
+     "words": 824,
+     "why": "a Change is routed to core, project or user, and shared only after the owner reads the redacted text",
+     "approved": "ch"
+    }
+   ]
+  }
+ }
+}
