@@ -1,5 +1,6 @@
-.DS_Store
 node_modules/
+service/.env
+.DS_Store
 .redcell/board.json
 .redcell/board.md
 .redcell/handoff*.md

@@ -55,7 +55,7 @@ Every hook exits 0 on any error. A broken hook adds nothing; it never stops a se
 | `scripts/board-security.mjs` | the plugin, imported by `board-md.mjs`; `--prompt <start> <head>` by hand | the Security verdict check (`securityCheck`), and the one Security prompt a verdict is counted from |
 | `scripts/prove-prompt.mjs` | the plugin, via `/prove` | builds the Prover's brief inside `.git/redcell/`; refuses a PRD with no walkthrough. `--steps <a-b>` keeps only those steps, `--role builds\|reads` marks a swarm member, `--list-steps` counts the steps. Every brief says its `Round:`; `--repass <earlier brief> --verdict <file>` makes the next round, carrying that verdict and diffing only from the commit it tested; round 3 is refused (exit 3) without `--lead-ruling <file>` |
 | `scripts/export.mjs` | anywhere, `node` only | writes HarteBurn into other tools' files (`tools`, `cursor`, `copilot`, `codex`, `gemini`, `agents-md`) or a claude.ai Project kit (`project`); `--check` names stale output. See [Other tools](other-tools.md), [Projects](projects.md) |
-| `scripts/login.mjs` | the plugin, by hand | `node scripts/login.mjs --key sy_…` stores a harteburn license under `REDCELL_HOME` (or `~/.claude/redcell`) and checks it at `HARTEBURN_URL` (default `https://harteburn.ngentix.ai`). `--verify` re-checks the saved key. A failed check still passes for 24 hours after the last good one. A good check caches the rules bundle |
+| `scripts/login.mjs` | the plugin, by hand | `node scripts/login.mjs --key sy_…` stores a harteburn license in `~/.claude/redcell` (the account's home, never `HOME` or `REDCELL_HOME`, which a repo's settings could set; `--home <absolute>` is for tests) and checks it at the address typed with `--url` (default `https://harteburn.ngentix.ai`), stored as `url`; no environment variable sets it. Run with no `--key` to re-check the saved key. `--sync-here`, run inside a repo, turns that repo's board and ledger sync on (off until then). A failed check still passes for 24 hours after the last good one. A good check caches the rules bundle |
 | `scripts/layers.mjs` | the plugin, via `/retro` | `--route "<where>"` prints `core`, `project` or `user`. `--place <file>` writes the Change to that layer. A core Change is an override on this machine |
 | `scripts/redact.mjs` | the plugin, via `/retro` | prints Problem, Cause, Change and How we'll know, and every identifier it stripped. It does not send |
 | `scripts/phone.mjs` | the plugin, by hand | `change <file> --yes` sends the redacted Change. Without `--yes`, or without a license file, it sends nothing |
@@ -72,7 +72,7 @@ Every hook exits 0 on any error. A broken hook adds nothing; it never stops a se
 | `.redcell/board.json`, `board.md`, `board.url` | `board.url` only | the Tech Lead writes `board.json` (the record; its keys in `scripts/board-schema.mjs`); `board-md.mjs` renders `board.md` and moves finished items out | kept, overwritten at the next `/frame` |
 | `.git/redcell/log-<id>.jsonl` | never | `board-md.mjs`: each finished work item, once, as `{ts, id, beat, state, text, note, kind}` (`ts: null, migrated: true` for items finished before the log); read by `/retro` | kept (`log-*.jsonl`) |
 | `.git/redcell/ledger.jsonl` | never | the ledger hook | kept (`ledger.jsonl`) |
-| `.git/redcell/stamps-<id>.json`, `open-record.json` | never | `board-md.mjs`: the board's stamps (each piece's start and end commit and time, the commit its range starts from, and the hashes of the files Claude Code and git load that git ignores (`opened_local`, `from_local`, `end_local`), the Security verdicts it saw, and the commit HEAD was at when the board first saw the record), and this tree's open record | kept (`stamps-*.json`, `open-record.json`) |
+| `.git/redcell/stamps-<id>.json`, `open-record.json` | never | `board-md.mjs`: the board's stamps (each piece's start and end commit and time, the commit its range starts from, and the hashes of the files Claude Code and git load that git ignores, and of ignored files the security table matches (except `.redcell/` and `node_modules/`) (`opened_local`, `from_local`, `end_local`), the Security verdicts it saw, and the commit HEAD was at when the board first saw the record), and this tree's open record | kept (`stamps-*.json`, `open-record.json`) |
 | `.git/redcell/rounds.jsonl`, `ci-releases.jsonl`, `legs.jsonl` | never | the Prover's round chain, the gate's released versions, a run's measured legs | kept |
 | `.git/redcell/prove-<ts>.md` | never | `/prove` | scratch: proposed for removal once its objective is past |
 | `.git/redcell/mutations.jsonl` | never | the builder, one line per guard it broke (`guard`, `file`, `break`, `test`, `result`); `/prove` moves it aside after a proven verdict | scratch: proposed for removal once its objective is past |
@@ -80,10 +80,10 @@ Every hook exits 0 on any error. A broken hook adds nothing; it never stops a se
 | `.git/redcell/steward.last`, `steward.jsonl` | never | `scripts/steward.mjs --stamp`: the latest sweep's result (`at`, `free_gb` in decimal GB as `df -H`, `proposed_bytes`, `proposed`, `listed`, `removed_bytes`: free space the repo's own script freed, approximate; `repo_script`, `trim_attempted`), and every sweep's, one line each | kept (`steward.last`, `steward.jsonl`) |
 | `.git/redcell/steward-ask.json`, `.git/redcell/steward-always.json` | never | `scripts/steward.mjs`: what is asked (each kind's count, bytes, a sample) and declined; the owner's "always here" answers | kept |
 | `~/.claude/redcell/steward-always.json` | never (outside every repo) | `scripts/steward.mjs --answer <kind> always-everywhere`: the owner's answers for every repo (`REDCELL_HOME` moves it) | kept |
-| `~/.claude/redcell/harteburn.json` | never (outside every repo) | `scripts/login.mjs`: the license key and the last good check (`REDCELL_HOME` moves it) | kept, mode 0600 |
+| `~/.claude/redcell/harteburn.json` | never (outside every repo) | `scripts/login.mjs`: the license key, its address, the last good check and the repos with sync on (nothing moves it) | kept, mode 0600 |
 | `~/.claude/redcell/changes.json` | never (outside every repo) | `scripts/layers.mjs`: user-layer Changes (`REDCELL_HOME` moves it) | kept |
 | `~/.claude/redcell/overrides.json` | never (outside every repo) | `scripts/layers.mjs`: a core Change built on this machine until it is submitted | kept |
-| `~/.claude/redcell/rules.json` | never (outside every repo) | `scripts/rules-fetch.mjs`: cached rules and the newest version (`REDCELL_HOME` moves it) | kept |
+| `~/.claude/redcell/rules.json` | never (outside every repo) | `scripts/rules-fetch.mjs`: cached rules and the newest version (nothing moves it) | kept |
 | `.redcell/changes.json` | the repo | `scripts/layers.mjs`: project-layer Changes | kept |
 | `.git/redcell/brief-score.json`, `ide-board-opened` | never | `/brief score`; the board preview hook | kept |
 | any other file under `.git/redcell/` | never | each is named by the script or skill that writes it (a session's kept tree in the hook, verdicts and rulings in `/prove`, notes and walkthroughs) | scratch: proposed for removal once its objective is past (newer than the oldest open record: kept) |
@@ -91,7 +91,7 @@ Every hook exits 0 on any error. A broken hook adds nothing; it never stops a se
 | any other directory under `.git/redcell/` | never | a role's scratch | proposed for removal once its objective is past |
 | a symbolic link under `.git/redcell/` | never | a person or a role | listed, never followed or removed (it may point at another repo) |
 
-**Other repos (security review, 2026-10-28):** the steward sweeps another repo an objective changed only when it has its own `.git/redcell` folder, and there it runs none of that repo's code: never its `scripts/disk-sweep.sh`, never `git status` (a filter driver would run), so its worktrees are listed "other repo: not checked", not proposed; its loose scratch is proposed as usual. Every git command the steward runs carries `core.fsmonitor=false` and `core.hooksPath=/dev/null`.
+**Other repos (security review, 2026-10-28):** the steward sweeps another repo an objective changed only when it has its own `.git/redcell` folder, and there it runs none of that repo's code: never its `scripts/disk-sweep.sh`, never `git status` (a filter driver would run), so its worktrees are listed "other repo: not checked", not proposed; its loose scratch is proposed as usual. Every git command the steward runs carries `core.fsmonitor=false` and `core.hooksPath=/dev/null`. Every git command the board's security check runs carries the same two settings and turns off every filter driver the repo's config names; a filtered file on the table (Git LFS) then reads as changed, so it refuses.
 
 The steward asks before it removes anything. `scripts/retention.mjs` holds the kept names (`KEEP`) and sorts every other entry (`classify`); this table shows the same list.
 
@@ -178,7 +178,14 @@ releases (~20 min, ~$0.60).
 
 The test for where a change belongs: **would it be true in every product?** If yes, it goes here. If it's one product's rule, it goes in that repo's house rules or architecture pages.
 
-This repository is the release. A version published here is what `claude plugin update harteburn@ngentix` installs. Development and the tests stay in the private repo. To try a checkout of this release without installing: `claude --plugin-dir ~/ngentix/harteburn`.
+1. Edit in your clone of this repo.
+2. Try it without installing: `claude --plugin-dir ~/ngentix/redcell`, or `/reload-plugins` in a session started that way.
+3. Run the tests: `node --test tests/*.test.mjs templates/scripts/__tests__/*.test.mjs`. They cover the hook and gate agreeing on the brief split, the hooks never failing a session, the Prover's brief never carrying a summary, and the checks on throwaway repos. Each guard has been mutated once to prove it bites.
+4. Validate: `claude plugin validate .`
+5. Bump `version` in `.claude-plugin/plugin.json`, and add a dated entry to [`CHANGELOG.md`](../CHANGELOG.md).
+6. Commit and push to `main`.
+7. Update your install: `claude plugin marketplace update ngentix && claude plugin update harteburn@ngentix`, then restart.
+8. If a template changed, copy it into each product repo.
 
 ## Repository layout
 
@@ -192,5 +199,6 @@ agents/*.md                       the role charters
 skills/{brief,prd-panel,prove}/   the commands
 scripts/                          the scorer, the Prover's brief builder, the export
 templates/scripts/                what each product repo copies
+tests/                            the plugin's own tests
 docs/                             this documentation
 ```

@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { phone } from "./phone.mjs";
-import { harteburnHome } from "./login.mjs";
+import { homeFlag, licenseHome } from "./login.mjs";
 
 const VERSION = /^\d+\.\d+\.\d+$/;
 
@@ -18,12 +18,12 @@ export function cmpVersion(a, b) {
   return 0;
 }
 
-export function rulesPath(home = harteburnHome()) {
+export function rulesPath(home = licenseHome()) {
   return join(home, "rules.json");
 }
 
 export async function refreshRules(opts = {}) {
-  const home = opts.home || harteburnHome();
+  const home = opts.home || licenseHome();
   const rules = await phone("rules", null, opts);
   const version = await phone("version", null, opts);
   if (!rules.sent && !version.sent) return { written: false, reason: rules.reason || version.reason };
@@ -40,7 +40,7 @@ export async function refreshRules(opts = {}) {
 }
 
 /** A one-line notice when the cached version is newer than this install. Empty when there is no cache. */
-export function behindNotice(localVersion, home = harteburnHome()) {
+export function behindNotice(localVersion, home = licenseHome()) {
   const path = rulesPath(home);
   if (!existsSync(path)) return "";
   try {
@@ -52,7 +52,7 @@ export function behindNotice(localVersion, home = harteburnHome()) {
 
 const invoked = process.argv[1] && process.argv[1].endsWith("rules-fetch.mjs");
 if (invoked) {
-  const result = await refreshRules();
+  const result = await refreshRules({ home: homeFlag() });
   console.log(result.written ? `cached ${result.cache.version || "rules"}` : (result.reason || "not cached"));
   process.exit(result.written ? 0 : 2);
 }

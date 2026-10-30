@@ -4,11 +4,14 @@
 
 import { readFileSync } from "node:fs";
 
+/** Every prefix a HarteBurn key carries: seat (sy_), owner (so_), and the older hb_. publish.mjs's leak scan reads this list too. */
+export const LICENSE_KEY_PREFIXES = ["sy", "so", "hb"];
+
 const RULES = [
   ["email", /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi],
   ["url", /https?:\/\/\S+/gi],
   ["ticket", /\b[A-Z]{2,}(?:-[A-Z]{2,})?-\d+\b/g],
-  ["secret", /\b(?:sy_|sk_|rk_|whsec_)[A-Za-z0-9_-]{8,}\b/g],
+  ["secret", new RegExp(`\\b(?:${[...LICENSE_KEY_PREFIXES.map((p) => p + "_"), "sk_", "rk_", "whsec_"].join("|")})[A-Za-z0-9_-]{8,}`, "g")],
   ["hex", /\b[a-f0-9]{16,}\b/gi],
 ];
 

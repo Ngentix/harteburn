@@ -89,6 +89,7 @@ files every run loads stay short (rc-steward, jg 2026-10-28). Grouped by the fil
 - **Hand off to a fresh conversation, never compact** (retro 2026-10-15): every call re-reads the whole conversation, so a long one costs the most.
 - **A fresh window resumes from files**: a fresh conversation that resumes from files is cheaper and loses nothing; a compacted summary is lossy and stays in the context that every later call re-reads.
 - **Never tell the owner to `/clear`** (jg, 2026-10-15): the old window stays readable; the new one starts small. The owner's words: "I do NOT want to use clear. I want to open a new window, so that I can see the old one if I need it".
+- **Reopened: `/clear` then `go` is the default handoff** (jg, 2026-10-30): "I can't really create a new session from my phone when we are working, and I want you to be able to continue here while I answer questions remotely." The old conversation stays reachable with `/resume`; a new window still works.
 
 ## skills/done/SKILL.md
 

@@ -25,11 +25,11 @@
 import { readFileSync, existsSync, mkdirSync, appendFileSync, renameSync, statSync, openSync, readSync, closeSync, accessSync, writeFileSync, constants, realpathSync, rmSync, utimesSync, statfsSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { homedir } from "node:os";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reminderLines } from "../scripts/steward.mjs";
 import { behindNotice } from "../scripts/rules-fetch.mjs";
+import { licensePath } from "../scripts/login.mjs";
 
 export const CAP = 10000;
 // Brief parts hooks.json sends, to sessions and agents alike (jg 2026-10-19: two parts → three).
@@ -630,8 +630,8 @@ function main(mode) {
       const notice = behindNotice(v);
       emit("SessionStart", fitToCap(ethos + "\n" + boardLine(root) + (notice ? "\n" + notice : ""), "the HarteBurn ethos"), fresh);
       try {
-        const home = process.env.REDCELL_HOME || join(homedir(), ".claude", "redcell");
-        if (existsSync(join(home, "harteburn.json"))) {
+        // The license folder is never the environment's: a project's settings can set HOME and REDCELL_HOME.
+        if (existsSync(licensePath())) {
           spawn(process.execPath, [join(PLUGIN_ROOT, "scripts", "rules-fetch.mjs")], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
         }
       } catch {}
@@ -673,7 +673,7 @@ function main(mode) {
       return;
     }
     case "handoff": {
-      // A handoff written by /handoff loads once into the next session the owner opens (a new window; never /clear).
+      // A handoff written by /handoff loads once into the next session: after /clear (the default, jg 2026-10-30), a new window, or a resume.
       const f = root ? join(root, ".redcell", "handoff.md") : "";
       if (!f || !existsSync(f)) return;
       const text = readFileSync(f, "utf8").trim();

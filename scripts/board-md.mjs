@@ -18,13 +18,12 @@
 // a one-line note. The record's runs come from the dispatch ledger (board-schema.mjs runsFromLedger).
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, isAbsolute, relative, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { BEATS, STATE_WORD, OPEN, FINISHED, normalize, doneOrder, beatMinutes, currentTimebox, assignIds, slugOf, refusals, runsFromLedger, applyStamps, heldToRules } from "./board-schema.mjs";
-import { securityCheck, sessionFiles } from "./board-security.mjs";
+import { securityCheck, sessionFiles, headOf, SAFE } from "./board-security.mjs";
 
 const MARK = { done: "[x]", dropped: "[~]", doing: "[ ]", todo: "[ ]", blocked: "[!]" };
 const BEAT_WORD = { done: "Done", todo: "To do", here: "Here", blocked: "Blocked", dropped: "Dropped" };
@@ -213,7 +212,7 @@ export function boardMarkdown(o, now = Date.now(), extra = {}) {
 export function openRecordPointer(root, rec) {
   let dir = "";
   try {
-    const g = execFileSync("git", ["rev-parse", "--git-dir"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const g = execFileSync("git", [...SAFE, "rev-parse", "--git-dir"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     dir = join(isAbsolute(g) ? g : join(root, g), "redcell");
   } catch {
     return [];
@@ -238,7 +237,7 @@ export function openRecordPointer(root, rec) {
 export function logPath(root, rec) {
   let dir = join(root, ".redcell");
   try {
-    let g = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    let g = execFileSync("git", [...SAFE, "rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     if (g) dir = join(isAbsolute(g) ? g : join(root, g), "redcell");
   } catch {}
   return join(dir, `log-${rec.id || slugOf(rec.title)}.jsonl`);
@@ -286,7 +285,9 @@ export function settle(raw, file, now = new Date(), { persist, ledger, root } = 
   } catch {}
   const was = JSON.stringify(stamps);
   let head = "";
-  if (root) try { head = execFileSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
+  // Through the board's own git: a git that refuses its overrides leaves no head, and securityCheck
+  // refuses every done piece on the same check (automated review of 8fcbec9).
+  if (root) try { head = headOf(root); } catch {}
   // Hashed once per render; past the cap, an empty baseline is stamped, so every file counts as new.
   let local;
   if (head) local = sessionFiles(root);
@@ -381,8 +382,10 @@ if (process.argv[1] && startedDirectly()) {
     process.stderr.write(`⛔ The board refuses .redcell/board.json (${problems.length} problem${problems.length > 1 ? "s" : ""}):\n${problems.map((p) => `- ${p}\n`).join("")}`);
     process.exitCode = 1;
   }
-  const home = process.env.REDCELL_HOME || join(homedir(), ".claude", "redcell");
-  if (existsSync(join(home, "harteburn.json"))) {
-    import("./board-sync.mjs").then((m) => Promise.all([m.pushBoard(root), m.pushLedger(root)])).catch(() => {});
-  }
+  // The license folder is never the environment's (a project's settings can set it); tests pass --home.
+  import("./login.mjs").then(({ homeFlag, licensePath }) => {
+    const home = homeFlag();
+    if (!existsSync(licensePath(home))) return;
+    return import("./board-sync.mjs").then((m) => Promise.all([m.pushBoard(root, { home }), m.pushLedger(root, { home })]));
+  }).catch(() => {});
 }

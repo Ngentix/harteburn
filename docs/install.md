@@ -38,19 +38,16 @@ claude plugin details harteburn@ngentix
 
 ### Claude desktop app, Code tab
 
-The Code tab runs Claude Code inside the desktop app, and **local** Code sessions get the full HarteBurn. One thing the desktop app does not document is a button for adding a *private* marketplace like ours. So the reliable route is a one-time copy-paste in Terminal; after that, the Code tab simply has HarteBurn.
+The Code tab runs Claude Code inside the desktop app, and **local** Code sessions get the full HarteBurn. One thing the desktop app does not document is a button for adding a marketplace. So the reliable route is a one-time copy-paste in Terminal; after that, the Code tab simply has HarteBurn.
 
 **Step 1 — one time, in the Terminal app** (Applications → Utilities → Terminal). Paste these lines, pressing Return after each:
 
 ```
-gh auth login
-gh auth setup-git
 claude plugin marketplace add Ngentix/harteburn
 claude plugin install harteburn@ngentix
 ```
 
-- `gh auth login` asks a few questions: choose **GitHub.com**, **HTTPS**, and **Login with a web browser**. It opens GitHub to approve.
-- If `gh` or `claude` is "command not found", install them first: `brew install gh`, and Claude Code from [code.claude.com](https://code.claude.com). If you only have the desktop app and no `claude` command, use step 1b instead.
+- If `claude` is "command not found", install Claude Code first from [code.claude.com](https://code.claude.com). If you only have the desktop app and no `claude` command, use step 1b instead.
 - You should see `✔ Successfully installed plugin: harteburn@ngentix (scope: user)`.
 
 **Step 1b — no Terminal: from the desktop app** (route documented by Anthropic, not yet tried by us). In a Code tab local session, click **+** next to the prompt box → **Plugins** → **Add plugin**. If **harteburn** from **ngentix** is listed, select it, choose **User** scope (every project on this computer), and install. If it is not listed, the marketplace has to be added first, and the desktop app has no documented button for that. Use step 1, or ask someone to do it once for you.

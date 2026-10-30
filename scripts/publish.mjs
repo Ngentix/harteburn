@@ -20,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { globRe } from "./globs.mjs";
+import { LICENSE_KEY_PREFIXES } from "./redact.mjs";
 
 /** What the public tree may hold. A new folder stays private until someone adds it here. */
 export const ALLOW = [
@@ -32,6 +33,8 @@ export const ALLOW = [
 export const NEVER = [
   /^retros\/(?!TEMPLATE-retro\.md$)/i, /^docs\/superpowers\//i, /^docs\/reviews\//i, /^service\//i,
   /^\.redcell\//i, /^\.harteburn\//i, /^tests\//i, /^publish\.config\.json$/i, /(^|\/)\.env(\.|$)/i,
+  // They list the hosted service's open weaknesses: a map for an attacker, not for a reader of the plugin.
+  /^docs\/harteburn-security-[^/]*\.md$/i, /^docs\/triage\.md$/i,
 ];
 
 /** Content no public file may hold. The customer names come from the private config, never from here. */
@@ -39,7 +42,7 @@ export const LEAKS = [
   ["a claude.ai artifact URL", /claude\.ai\/(?:code\/)?artifact\/[A-Za-z0-9-]{8,}/i],
   ["a Stripe secret key", /\b[sr]k_live_[A-Za-z0-9]{12,}/],
   ["a Stripe webhook secret", /\bwhsec_[A-Za-z0-9]{12,}/],
-  ["a HarteBurn license key", /\b(?:sy|hb)_[A-Za-z0-9_-]{20,}/],
+  ["a HarteBurn license key", new RegExp(`\\b(?:${LICENSE_KEY_PREFIXES.join("|")})_[A-Za-z0-9_-]{20,}`)],
   ["a GitHub token", /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})/],
   ["an Anthropic API key", /\bsk-ant-[A-Za-z0-9_-]{20,}/],
   ["an AWS access key", /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/],

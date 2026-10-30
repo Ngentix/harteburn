@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 // Phone-home for the scripts, never the hooks. No license file, no send.
 // A Change is sent only after redact.mjs and an explicit --yes, so the owner has seen the stripped text.
+// The address is the one stored at login, never the environment.
 
 import { readFileSync } from "node:fs";
-import { readLicense, harteburnHome, DEFAULT_URL } from "./login.mjs";
+import { readLicense, licenseHome, DEFAULT_URL } from "./login.mjs";
 import { redactChange } from "./redact.mjs";
 
 export async function phone(kind, payload, { home, url, fetchImpl = globalThis.fetch, timeoutMs = 2500 } = {}) {
-  const lic = readLicense(home || harteburnHome());
+  const lic = readLicense(home || licenseHome());
   if (!lic?.key) return { sent: false, reason: "no license" };
-  const base = (url || process.env.HARTEBURN_URL || DEFAULT_URL).replace(/\/$/, "");
+  const base = (url || lic.url || DEFAULT_URL).replace(/\/$/, "");
   const headers = { "content-type": "application/json", authorization: `Bearer ${lic.key}` };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);

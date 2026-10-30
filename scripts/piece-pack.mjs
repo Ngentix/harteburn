@@ -30,7 +30,7 @@ const fail = (m, c = 2) => {
 };
 if (!prdArg || !opt("--steps")) fail("usage: piece-pack.mjs <prd.md> --steps <a-b> [--base <ref>] [--ready <file>]... [--max-kb <n>]");
 
-const git = (a, cwd) => execFileSync("git", a, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).trim();
+const git = (a, cwd) => execFileSync("git", ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...a], { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).trim();
 const root = git(["rev-parse", "--show-toplevel"], process.cwd());
 let gitDir = git(["rev-parse", "--git-common-dir"], root);
 if (!isAbsolute(gitDir)) gitDir = join(root, gitDir);
@@ -55,7 +55,7 @@ for (const f of all("--ready")) {
 }
 const base = opt("--base");
 if (base) {
-  const stat = git(["diff", "--stat", base], root);
+  const stat = git(["diff", "--stat", "--end-of-options", base], root);
   const untracked = git(["ls-files", "--others", "--exclude-standard"], root);
   parts.push(`## The change since ${base.slice(0, 12)} (stat only; read the files you cite)\n\n\`\`\`\n${stat || "(no change)"}\n\`\`\`\n` + (untracked ? `\nUntracked:\n${untracked.split("\n").map((f) => "- " + f).join("\n")}\n` : ""));
 }

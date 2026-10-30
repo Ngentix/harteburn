@@ -80,6 +80,10 @@ const SESSION_RES = SESSION_FILES.map(globRe);
 const NOT_SESSION = [".claude/worktrees/**", "**/.claude/worktrees/**"].map(globRe);
 // For git: the same globs (git's `**/` also matches no folder), and `**/*/`, which lists nested repos.
 const PATHSPECS = [...SESSION_FILES.map((g) => `:(glob,icase)${g}`), ":(glob)**/*/", ":(exclude,glob,icase)**/.claude/worktrees/**"];
+/** Ignored files the board never hashes: its own writes, and the top folder's installed packages (Architect,
+ * RC-SECURITY-9 A); a node_modules under a table folder is hashed (automated review of c5af5ae). */
+export const LOCAL_ALLOW = [".redcell/**", "node_modules/**"];
+const ALLOW_RES = LOCAL_ALLOW.map(globRe);
 export const SESSION_CAP = { files: 200, bytes: 1 << 20, depth: 8 };
 export const TOO_MANY = "too many session files to hash";
 const capped = (why) => Object.assign(new Error(`${TOO_MANY} (${why})`), { capped: true });
@@ -88,8 +92,8 @@ const capped = (why) => Object.assign(new Error(`${TOO_MANY} (${why})`), { cappe
 export function sessionFiles(root) {
   try {
     return hashSession(root);
-  } catch {
-    return { error: "the board could not hash the session files" };
+  } catch (e) {
+    return { error: e?.reason || "the board could not hash the session files" };
   }
 }
 function hashSession(root) {
@@ -115,30 +119,35 @@ function hashSession(root) {
   }
   return { files };
 }
-function sessionPaths(root, paths, depth) {
+function sessionPaths(root, paths, depth, top = root, loose = false) {
   if (depth > SESSION_CAP.depth) throw capped(`nested repos deeper than ${SESSION_CAP.depth}`);
+  // A repo whose work tree is set elsewhere lists nothing from its own folder: it refuses, as a
+  // committed checkout's does (Security r5 on piece 9).
+  if (depth > 0 && git(root, ["rev-parse", "--show-toplevel"]).trim() !== realpathSync(root))
+    throw Object.assign(new Error(), { reason: `the nested repo ${JSON.stringify(relative(top, root))} has its work tree set elsewhere` });
   const mine = new Set();
   const add = (f) => {
     mine.add(f);
     if (paths.size + mine.size > SESSION_CAP.files) throw capped(`more than ${SESSION_CAP.files} files`);
   };
   const abs = (args) => git(root, ["rev-parse", "--path-format=absolute", ...args]).trim();
-  const nested = new Set();
+  const nested = new Set(), checkouts = new Set();
   for (const f of nul(git(root, ["ls-files", "-z", "--others", "--", ...PATHSPECS]))) {
     if (NOT_SESSION.some((re) => re.test(f))) continue;
     if (f.endsWith("/")) nested.add(f.slice(0, -1));
     else if (SESSION_RES.some((re) => re.test(f))) add(join(root, f));
   }
+  for (const f of tableFilesIn(top, root, depth, loose)) add(join(root, f));
   // The index: what git tracks (a session file only while its bytes on disk differ from HEAD's, or a
   // symlink), committed checkouts (mode 160000, with or without .gitmodules), and tracked files the
   // globs match. The bytes are compared raw, never through git's diff, which a stat cache, an
   // fsmonitor, a clean filter or an index flag can blind (automated reviews of dae9cef and a61e082).
   const tracked = new Set(), links = new Set(), sessionTracked = [];
-  for (const e of nul(execFileSync("git", ["ls-files", "-s", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "ignore"] }))) {
+  for (const e of nul(git(root, ["ls-files", "-s", "-z"]))) {
     const tab = e.indexOf("\t");
     const f = e.slice(tab + 1);
     tracked.add(f);
-    if (e.startsWith("160000 ")) { nested.add(f); continue; }
+    if (e.startsWith("160000 ")) { nested.add(f); checkouts.add(f); continue; }
     // A tracked symlink: git shows its text, never what its target holds.
     if (e.startsWith("120000 ")) links.add(f);
     if (!NOT_SESSION.some((re) => re.test(f)) && SESSION_RES.some((re) => re.test(f))) sessionTracked.push(f);
@@ -147,9 +156,9 @@ function sessionPaths(root, paths, depth) {
   // by no diff the board reads, so every tracked session file counts by content (Security round 19).
   const same = depth > 0 ? new Set() : sameAsHead(root, sessionTracked.filter((f) => !links.has(f)));
   for (const f of sessionTracked) if (!same.has(f)) add(join(root, f));
-  // --git-path honours core.hooksPath; config.worktree is a linked worktree's own config; --includes
+  // hooksDir reads core.hooksPath; config.worktree is a linked worktree's own config; --includes
   // names every file the repo's config pulls in (include.path, includeIf).
-  const hooks = abs(["--git-path", "hooks"]), common = abs(["--git-common-dir"]), own = abs(["--git-dir"]);
+  const common = abs(["--git-common-dir"]), own = abs(["--git-dir"]), hooks = hooksDir(root, common);
   let hookFiles = [];
   try { hookFiles = readdirSync(hooks).filter((f) => !f.endsWith(".sample")).map((f) => join(hooks, f)); } catch {}
   let included = [];
@@ -183,8 +192,44 @@ function sessionPaths(root, paths, depth) {
   for (const [i, f] of [...mine].entries()) if (!sameNow.has(rels[i])) paths.add(f);
   for (const d of nested) {
     const sub = join(root, d);
-    if (existsSync(join(sub, ".git"))) sessionPaths(sub, paths, depth + 1);
+    if (existsSync(join(sub, ".git"))) sessionPaths(sub, paths, depth + 1, top, !checkouts.has(d));
   }
+}
+/** Files the security table matches that no diff the board reads shows (automated review of 0.23.2;
+ * Architect, RC-SECURITY-9 A; Security r4): hashed as session files. One listing with folders
+ * collapsed; a folder is opened only when a table glob's literal start can reach into it. */
+/** Whether some glob can match a path inside folder `d` ("x/y/"): its literal start (up to the first
+ * * or ?) is a prefix of `d`, or the reverse. It over-approximates, so what it prunes is never reached. */
+const reacher = (globs) => {
+  const lits = globs.map((g) => g.slice(0, (g.search(/[*?]/) + 1 || g.length + 1) - 1).toLowerCase());
+  return (d) => lits.some((p) => p.startsWith(d.toLowerCase()) || d.toLowerCase().startsWith(p));
+};
+/** The table's regexes, each carrying its glob, so folder reach can be judged from them. */
+const heldRes = (globs) => globs.map((g) => Object.assign(globRe(g), { glob: g }));
+function tableFilesIn(top, root, depth, loose) {
+  const globs = tableGlobs(top);
+  if (!globs?.length) return [];
+  const res = globs.map(globRe);
+  const reach = reacher(globs);
+  // Matched against the top repo's table, by the path from the top (Security r4 on piece 9).
+  const pre = depth ? `${relative(top, root).split("\\").join("/")}/` : "";
+  const allowed = (f) => ALLOW_RES.some((re) => re.test(pre + f));
+  const on = (f) => !allowed(f) && res.some((re) => re.test(pre + f));
+  const list = (...a) => nul(git(root, ["ls-files", "-z", ...a]));
+  // The top repo's untracked files are git's to show (changedSince); in a nested repo or a committed
+  // checkout no diff the board reads shows them, so those count too, and in a nested repo the top
+  // repo does not track, so do its tracked files.
+  const kinds = [["--others", "--ignored", "--exclude-standard"], ...(depth ? [["--others", "--exclude-standard"]] : [])];
+  const out = [];
+  for (const k of kinds)
+    for (const e of list(...k, "--directory")) {
+      if (!e.endsWith("/")) { if (on(e)) out.push(e); continue; }
+      if (allowed(`${e}x`) || !reach(pre + e)) continue;
+      // A folder entry inside it is a nested repo: sessionPaths reads those on its own.
+      for (const f of list(...k, "--", `:(literal)${e}`)) if (!f.endsWith("/") && on(f)) out.push(f);
+    }
+  if (depth && loose) for (const f of list()) if (on(f)) out.push(f);
+  return out;
 }
 /** The paths in `rels` that are exactly their blob at HEAD: the same mode (a regular file, the same
  * exec bit), reached through no symlinked folder, and the same raw bytes, hashed here as git's blob id
@@ -196,7 +241,7 @@ function sameAsHead(root, rels) {
   if (!want.length) return out;
   try {
     const head = new Map();
-    for (const e of nul(git(root, ["-c", "core.fsmonitor=false", "--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", ...want]))) {
+    for (const e of nul(git(root, ["--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", ...want]))) {
       const tab = e.indexOf("\t");
       const [mode, type, id] = e.slice(0, tab).split(" ");
       if (type === "blob" && (mode === "100644" || mode === "100755")) head.set(e.slice(tab + 1), { mode, id });
@@ -221,10 +266,78 @@ function sameAsHead(root, rels) {
 export const localDelta = (a = {}, b = {}) =>
   [...new Set([...Object.keys(a), ...Object.keys(b)])].sort().filter((f) => a[f] !== b[f]).map((f) => [f, b[f] ?? null]);
 
-const git = (root, args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+// A repo's config never runs code while the board reads it (automated review of 0.23.2; Architect,
+// RC-SECURITY-9 B): no fsmonitor, no hooks, and every filter driver it names turned off (a clean or
+// process filter runs on a work-tree diff). The file's only git spawn. A filter's file on the table
+// (Git LFS) then reads as changed in a work-tree diff: it refuses, never passes. The filters go in as
+// GIT_CONFIG_KEY/VALUE pairs, which take a key whole: `-c` splits at the first "=", so a filter named
+// "a=b" stayed on (Security r1 on piece 9). Needs git 2.31 or later.
+// No transport at all, so a partial clone's lazy fetch of a missing object never runs
+// remote.<promisor>.uploadpack (Security r2 on piece 9); a missing blob then reads as unreadable. A
+// repo's protocol.<name>.allow beats protocol.allow, so each built-in transport is named too (automated
+// review of 44ced9b); a remote helper by another name must already be on PATH. GIT_NO_LAZY_FETCH
+// (git 2.45 or later) is set as well, in git() below.
+const TRANSPORTS = ["file", "ext", "ssh", "git", "http", "https", "ftp", "ftps", "fd"];
+export const SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "protocol.allow=never", ...TRANSPORTS.flatMap((p) => ["-c", `protocol.${p}.allow=never`])];
+/** HEAD's id with every override on, or "" when there is none; throws when git refuses the overrides. */
+export function headOf(root) {
+  filtersOff(root);
+  try { return git(root, ["rev-parse", "--verify", "HEAD"]).trim(); } catch { return ""; }
+}
+function git(root, args, { input, buffer, raw, env } = {}) {
+  return execFileSync("git", [...SAFE, ...args], {
+    cwd: root, input, env: { ...(env || (raw ? process.env : filtersOff(root))), GIT_NO_LAZY_FETCH: "1" }, encoding: buffer ? undefined : "utf8", maxBuffer: 1 << 30,
+    stdio: [input == null ? "ignore" : "pipe", "pipe", "ignore"],
+  });
+}
+const filtersCache = new Map();
+function filtersOff(root) {
+  if (!filtersCache.has(root)) {
+    let keys = [];
+    try {
+      keys = nul(git(root, ["config", "-z", "--get-regexp", "^(filter|protocol)\\."], { raw: true })).map((e) => e.split("\n")[0]);
+    } catch (e) {
+      // Status 1 is "no filters"; anything else is a config the board cannot read, so it refuses.
+      if (e.status !== 1) throw e;
+    }
+    const names = new Set(keys.filter((k) => /^filter\./i.test(k)).map((k) => k.slice("filter.".length, k.lastIndexOf("."))).filter(Boolean));
+    const pairs = [...names].flatMap((n) => [["clean", ""], ["smudge", ""], ["process", ""], ["required", "false"]].map(([k, v]) => [`filter.${n}.${k}`, v]));
+    // Every protocol.<name>.allow the repo sets goes back to never, whatever the name: a remote helper
+    // the repo allows by its own name beats protocol.allow (automated review of fdec551).
+    for (const k of keys) if (/^protocol\..+\.allow$/i.test(k)) pairs.push([k, "never"]);
+    const env = { ...process.env, GIT_CONFIG_COUNT: String(pairs.length) };
+    pairs.forEach(([k, v], i) => { env[`GIT_CONFIG_KEY_${i}`] = k; env[`GIT_CONFIG_VALUE_${i}`] = v; });
+    // A git that ignores the pairs (older than 2.31) would leave every filter on: the board checks that
+    // git reads the first one back from the command line, as set, and refuses otherwise (automated review of e58a9db).
+    if (pairs.length) {
+      let back = "";
+      try { back = git(root, ["config", "-z", "--show-scope", "--get", pairs[0][0]], { env }); } catch {}
+      if (back !== `command\0${pairs[0][1]}\0`) throw new Error("git did not take the board's filter overrides (git 2.31 or later is needed)");
+    }
+    filtersCache.set(root, env);
+  }
+  return filtersCache.get(root);
+}
+/** Where git runs this repo's hooks: core.hooksPath as the repo's own config sets it (SAFE overrides it
+ * for every call, so it is read by scope), expanded by git itself (--type=path: ~, ~user, %(prefix)/;
+ * Prover on c5af5ae: "~user/" read as a folder in the work tree), a relative one from the work tree's
+ * top; else the common dir's hooks. A value git cannot expand refuses. */
+function hooksDir(root, common) {
+  let t = [];
+  try {
+    // -z prints scope and value as two entries each; an empty value is an empty entry.
+    t = git(root, ["config", "-z", "--show-scope", "--type=path", "--get-all", "core.hooksPath"]).split("\0");
+  } catch (e) {
+    if (e.status !== 1) throw Object.assign(new Error(), { reason: "the board could not expand core.hooksPath" });
+  }
+  let v = "";
+  for (let i = 0; i + 1 < t.length; i += 2) if (t[i] !== "command") v = t[i + 1];
+  if (!v) return join(common, "hooks");
+  return resolve(git(root, ["rev-parse", "--show-toplevel"]).trim(), v);
+}
 const isAncestor = (root, a, b) => {
   try {
-    git(root, ["merge-base", "--is-ancestor", a, b]);
+    git(root, ["merge-base", "--is-ancestor", "--end-of-options", a, b]);
     return true;
   } catch {
     return false;
@@ -236,7 +349,7 @@ const isAncestor = (root, a, b) => {
 const exactCommit = (root, x) => (/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(String(x)) && commitOf(root, x) === x ? x : "");
 const commitOf = (root, sha) => {
   try {
-    return git(root, ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]).trim();
+    return git(root, ["rev-parse", "--verify", "--quiet", "--end-of-options", `${sha}^{commit}`]).trim();
   } catch {
     return "";
   }
@@ -253,7 +366,9 @@ export function tableGlobs(root) {
  * removing a row in the same piece never frees that path (Security's sixth verdict on piece 3). */
 function tableGlobsAt(root, sha) {
   try {
-    const rows = parsePathTable(git(root, ["show", `${sha}:${HOUSE_RULES}`]), TABLE_HEADING);
+    const id = exactCommit(root, sha);
+    if (!id) return null;
+    const rows = parsePathTable(git(root, ["cat-file", "blob", "--end-of-options", `${id}:${HOUSE_RULES}`]), TABLE_HEADING);
     return rows && rows.flatMap((r) => r.paths);
   } catch {
     return null;
@@ -265,7 +380,7 @@ const nul = (s) => s.split("\0").filter(Boolean);
  * git's diff never shows their edits, so they always count as changed (automated review of dae9cef). */
 function hiddenTracked(root) {
   const out = new Set();
-  for (const e of nul(execFileSync("git", ["ls-files", "-v", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 1 << 30, stdio: ["ignore", "pipe", "ignore"] })))
+  for (const e of nul(git(root, ["ls-files", "-v", "-z"])))
     if (e[0] === "S" || (e[0] >= "a" && e[0] <= "z")) out.add(e.slice(2));
   return out;
 }
@@ -276,22 +391,53 @@ function changedSince(root, sha, res) {
   // Against HEAD as well as the working tree: a committed change the working tree puts back is still
   // the piece's (Prover round 4 on ff8d871).
   const files = new Set([
-    ...nul(git(root, ["diff", "--name-only", "-z", "--no-renames", sha, "HEAD"])),
-    ...nul(git(root, ["diff", "--name-only", "-z", "--no-renames", sha])),
+    ...nul(git(root, ["diff", "--name-only", "-z", "--no-renames", "--end-of-options", sha, "HEAD"])),
+    ...nul(git(root, ["diff", "--name-only", "-z", "--no-renames", "--ignore-submodules=dirty", "--end-of-options", sha])),
     // And the index: a staged change whose working copy is put back is still committed next (Prover
     // round 5 on 172968a).
-    ...nul(git(root, ["diff", "--name-only", "-z", "--no-renames", "--cached", sha])),
+    ...nul(git(root, ["diff", "--name-only", "-z", "--no-renames", "--cached", "--end-of-options", sha])),
     ...nul(git(root, ["ls-files", "-z", "--others", "--exclude-standard"])),
     ...hiddenTracked(root),
   ]);
-  return [...files].filter((f) => res.some((re) => re.test(f)));
+  // The work-tree diff skips inside committed checkouts (their status would run their own filters), so
+  // each one on the table is read as its own repo, with its own overrides: any edit, staged change or
+  // new file in it counts at its path; a git failure there throws, and the piece refuses (Security r3).
+  // A checkout counts whole when the table reaches into it (a glob that matches only some of its files
+  // too: its changes are not listed one by one), and any change in it, or its commit, counts at its
+  // path (automated review of 8fcbec9). A regex with no glob reaches everything (fails closed).
+  const reach = res.every((re) => re.glob != null) ? reacher(res.map((re) => re.glob)) : () => true;
+  const links = new Set();
+  for (const e of [...nul(git(root, ["ls-files", "-s", "-z"])), ...nul(git(root, ["ls-tree", "-r", "-z", "--end-of-options", sha]))])
+    if (e.startsWith("160000 ")) links.add(e.slice(e.indexOf("\t") + 1));
+  for (const e of nul(git(root, ["ls-files", "-s", "-z"])))
+    if (e.startsWith("160000 ")) {
+      const d = e.slice(e.indexOf("\t") + 1);
+      if (reach(`${d}/`) && checkoutDirty(join(root, d), e.split(" ")[1], 0)) files.add(d);
+    }
+  return [...files].filter((f) => res.some((re) => re.test(f)) || (links.has(f) && reach(`${f}/`)));
+}
+/** Whether the checkout at `dir` differs from `want` (the commit the parent records) or from its own
+ * HEAD in any way. A folder with content but no git of its own, or whose git is another folder's,
+ * counts as changed (automated review of 8fcbec9). */
+function checkoutDirty(dir, want, depth) {
+  if (!existsSync(join(dir, ".git"))) {
+    try { return readdirSync(dir).length > 0; } catch { return false; }
+  }
+  if (depth > SESSION_CAP.depth) throw capped(`nested checkouts deeper than ${SESSION_CAP.depth}`);
+  if (git(dir, ["rev-parse", "--show-toplevel"]).trim() !== realpathSync(dir)) return true;
+  const head = git(dir, ["rev-parse", "--verify", "HEAD"]).trim();
+  if (want && head !== want) return true;
+  if (nul(git(dir, ["diff", "--name-only", "-z", "--no-renames", "--ignore-submodules=dirty", "--end-of-options", head])).length) return true;
+  if (nul(git(dir, ["diff", "--name-only", "-z", "--no-renames", "--cached", "--end-of-options", head])).length) return true;
+  if (nul(git(dir, ["ls-files", "-z", "--others", "--exclude-standard"])).length) return true;
+  return nul(git(dir, ["ls-files", "-s", "-z"])).some((x) => x.startsWith("160000 ") && checkoutDirty(join(dir, x.slice(x.indexOf("\t") + 1)), x.split(" ")[1], depth + 1));
 }
 
 /** Table paths changed from `from` to `to` (a closed range), or, with no `to`, since `from` in the
  * working tree, uncommitted and untracked included (an open range: the piece still at the tip). */
 function changedIn(root, from, to, res) {
   if (!to) return changedSince(root, from, res);
-  return nul(git(root, ["diff", "--name-only", "-z", "--no-renames", from, to])).filter((f) => res.some((re) => re.test(f)));
+  return nul(git(root, ["diff", "--name-only", "-z", "--no-renames", "--end-of-options", from, to])).filter((f) => res.some((re) => re.test(f)));
 }
 
 /**
@@ -303,13 +449,13 @@ function changedIn(root, from, to, res) {
  * ended, or none while it is the latest (then HEAD and the working tree); a reopen only widens it.
  */
 function pieceStart(root, st) {
-  const head = commitOf(root, st.head);
+  const head = exactCommit(root, st.head);
   if (!head) throw new Error("head is not a commit");
   if (!st.from_head) return head;
   // A stamped start that is not a commit refuses, never shrinks the range (Architect, rounds 8 and 14).
-  const from = commitOf(root, st.from_head);
+  const from = exactCommit(root, st.from_head);
   if (!from) throw new Error("from_head is not a commit");
-  return git(root, ["merge-base", head, from]).trim();
+  return git(root, ["merge-base", "--end-of-options", head, from]).trim();
 }
 function pieceRange(root, rec, stamps, n) {
   const start = pieceStart(root, stamps.pieces[n]);
@@ -338,7 +484,7 @@ function blobs(root, ids) {
   const want = [...new Set(ids.filter((x) => x && !ZERO.test(x)))];
   const out = new Map();
   if (!want.length) return out;
-  const buf = execFileSync("git", ["cat-file", "--batch"], { cwd: root, input: want.join("\n") + "\n", maxBuffer: 1 << 30, stdio: ["pipe", "pipe", "ignore"] });
+  const buf = git(root, ["cat-file", "--batch"], { input: want.join("\n") + "\n", buffer: true });
   let at = 0;
   for (const id of want) {
     const nl = buf.indexOf(10, at);
@@ -363,7 +509,7 @@ function reallyChanged(root, from, to, res) {
   return changedCache.get(key);
 }
 function contentChanged(root, from, to, res) {
-  const t = nul(git(root, ["diff", "--raw", "-z", "--no-renames", "--no-abbrev", from, to]));
+  const t = nul(git(root, ["diff", "--raw", "-z", "--no-renames", "--no-abbrev", "--end-of-options", from, to]));
   const on = (f) => res.some((re) => re.test(f));
   const rows = [];
   for (let i = 0; i + 1 < t.length; i += 2) {
@@ -558,6 +704,21 @@ export function securityCheck(root, rec, stamps, ledger, { env = process.env, lo
   const res = { problems: [], notes: [], shown: {} };
   if (!root || !rec?.id || !heldToRules({ opened_at: stamps?.opened_at ?? rec.opened_at })) return res;
   let globs;
+  // No repo: nothing to hold. Read raw (it reads no object), so a git that refuses the overrides gets
+  // past here and is refused below, never read as "no repo" (automated review of e58a9db). Then no
+  // commit yet: nothing to hold, read with the overrides on (a missing commit is a lazy fetch).
+  try {
+    git(root, ["rev-parse", "--git-dir"], { raw: true });
+  } catch {
+    return res;
+  }
+  try {
+    filtersOff(root);
+  } catch (e) {
+    for (const p of rec.pieces || [])
+      if (["done", "dropped"].includes(p.state)) res.problems.push(`Piece ${p.n}: ${e.message}: it stays refused until the board can turn this repo's filter drivers off`);
+    return res;
+  }
   try {
     git(root, ["rev-parse", "--verify", "HEAD"]);
     globs = tableGlobs(root);
@@ -567,6 +728,12 @@ export function securityCheck(root, rec, stamps, ledger, { env = process.env, lo
   local ||= sessionFiles(root);
   if (!globs) res.notes.push(NO_TABLE);
   let all;
+  // A stamp reaches git only as a checked commit id; one that is not refuses, never reads as "no table"
+  // (automated review of 0.23.2: "--output=<file>" was a git option).
+  const badOpened = stamps?.opened_head != null && !exactCommit(root, stamps.opened_head);
+  if (badOpened)
+    for (const p of rec.pieces || [])
+      if (["done", "dropped"].includes(p.state)) res.problems.push(`Piece ${p.n}: the record's opened_head stamp (${JSON.stringify(stamps.opened_head)}) is not a commit: it stays refused until it is put back`);
   for (const p of rec.pieces || []) {
     const st = stamps?.pieces?.[p.n];
     // A dropped piece's commits stay in the repo: it is held like a done one (automated review, 2bbb933).
@@ -600,10 +767,10 @@ export function securityCheck(root, rec, stamps, ledger, { env = process.env, lo
       const held = [...new Set([...(globs || []), ...(tableGlobsAt(root, start) || []), ...(stamps?.opened_head ? tableGlobsAt(root, stamps.opened_head) || [] : [])])];
       if (held.length) held.push(HOUSE_RULES);
       if (!held.length) continue;
-      const re = held.map(globRe);
+      const re = heldRes(held);
       if (local.error) {
         delete st.security;
-        res.problems.push(`${at}: ${local.error}: it stays refused until there are ${SESSION_CAP.files} or fewer, each 1 MB or less`);
+        res.problems.push(`${at}: ${local.error}: it stays refused until ${local.error.startsWith(TOO_MANY) ? `there are ${SESSION_CAP.files} or fewer, each 1 MB or less` : "the board can read them"}`);
         continue;
       }
       // The session files changed in the range (from its stamped start to the next piece's, or the disk
@@ -771,7 +938,7 @@ const listed = (hit) => hit.slice(0, 5).join(", ") + (hit.length > 5 ? ` (+${hit
 function canonicalHashes(root, start, delta = []) {
   const base = commitOf(root, start);
   // Every head a covering verdict may name (base..HEAD), never fewer than `covering` accepts.
-  const heads = [base, ...git(root, ["rev-list", `${base}..HEAD`]).split("\n").filter(Boolean)];
+  const heads = [base, ...git(root, ["rev-list", "--end-of-options", `${base}..HEAD`]).split("\n").filter(Boolean)];
   return new Set(heads.map((h) => createHash("sha256").update(securityPrompt(base, h, delta)).digest("hex")));
 }
 

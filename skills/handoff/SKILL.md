@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Hand the work to a fresh conversation at a safe checkpoint - the board and memory brought current, a continuation prompt written to .redcell/handoff.md (and shown in chat), then the owner opens a NEW conversation window (keeping this one open to look back at; never /clear) and types "go", and the new session loads the handoff by itself. Use when the HarteBurn reminder says the context is past its threshold, when an objective closes, or when the owner asks. Never compact instead.
+description: Hand the work to a fresh conversation at a safe checkpoint - the board and memory brought current, a continuation prompt written to .redcell/handoff.md (and shown in chat), then the owner types /clear and "go", and the fresh session loads it by itself. Use when the HarteBurn reminder says the context is past its threshold, when an objective closes, or when the owner asks. Never compact instead.
 argument-hint: (none)
 ---
 
@@ -25,11 +25,8 @@ Hand off. **Timebox: 5 min.**
    - anything learned this session that is not in a file yet (then put it in one).
 4. **Show it in chat** as one fenced copy-paste block (the owner's standing rule: continuation
    prompts live in chat), and say:
-   > Open a new conversation window and type `go`; it loads this handoff by itself. Keep this
-   > window open if you want to look back at it, but don't work in it any more.
+   > Type `/clear`, then `go`; it loads this handoff by itself (`/resume` reopens this one).
 
-   ⛔ **Never tell the owner to `/clear`**. The handoff loads once, into whichever session starts next (the hook
-   moves it to `handoff.loaded.md`).
+   It loads once, into whichever session starts next (a new window and `go` works too).
 5. Never compact.
-6. **After the handoff, this session stops working.** Answer questions about what happened, but
-   start no new work and make no edits here, so two windows never write to the same tree.
+6. **After the handoff, no edits until the fresh session loads it.** Answer questions only.

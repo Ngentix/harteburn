@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // HarteBurn architecture brief: stamp, check and list. Lives in each repo so anyone
-// can clear a stale brief without the plugin. Source: github.com/Ngentix/redcell
+// can clear a stale brief without the plugin. Source: the HarteBurn plugin,
 // templates/scripts/brief-stamp.mjs; copy, don't fork.
 //
 //   node scripts/brief-stamp.mjs --check [<a>..<b> ...]

@@ -53,3 +53,4 @@ Four things, each provided by Claude Code itself:
 - **An install is a copy pinned to a commit.** A change to this repo reaches you only after `claude plugin update harteburn@ngentix`.
 - **The roles have no memory between sessions**, because Claude Code would keep it as untracked files inside each repo.
 - **Cost:** about 4,400 extra input tokens per session (cached), and about 250,000 tokens per PRD panel.
+- **A folder you trust can run code.** Once you trust a folder in Claude Code, its `.claude/settings.json` can define its own hooks and environment. HarteBurn never takes its license folder or address from the environment, but no plugin check stops a trusted folder's own hooks; open folders you did not write with care (piece 8's sandbox is the planned answer).

@@ -1,5 +1,5 @@
 // The architecture brief is current, complete and fits. HarteBurn.
-// Source: github.com/Ngentix/redcell templates/scripts/__tests__/brief.test.mjs
+// Source: the HarteBurn plugin, templates/scripts/__tests__/brief.test.mjs
 // Run: node --test scripts/__tests__/brief.test.mjs   (a gate in verify.sh and pre-push)
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

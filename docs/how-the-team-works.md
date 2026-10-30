@@ -46,9 +46,9 @@ the most (measured: late calls ~10× early ones).
 - When the reminder hook reports context past the threshold (500k tokens by default since 0.7.1,
   `REDCELL_HANDOFF_TOKENS`), or an objective closes, the Tech Lead hands off at the next checkpoint.
 - It brings the board and memory current, writes `.redcell/handoff.md`, and shows it in chat.
-- The owner opens a **new conversation window** and types `go`; the session hook loads the handoff
-  once. The old window stays open to look back at, and no more work happens in it. Never `/clear`
-  (jg, 2026-10-15: they want to see the old conversation).
+- The owner types **`/clear`, then `go`**, in the same window; the session hook loads the handoff
+  once. A new window and `go` works the same. The old conversation stays reachable with `/resume`
+  (jg, 2026-10-30, reopening 2026-10-15: they answer from a phone and cannot open a new session there).
 - Never compact.
 
 **Flow:**
