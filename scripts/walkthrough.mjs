@@ -91,3 +91,22 @@ export const SCREEN_ROWS = [
   "failure: each refusal, source failure, crash or repeat the walkthrough or the Ready ruling names for it shows its own sentence and the money it really moved",
 ];
 
+
+/** Each markdown table in `md`: its header cells and its rows ({line, cells}), a table being a `|` line
+ * followed by a separator line. "\|" is a pipe inside a cell, as in markdown. One parser for the readers
+ * list (/prove after --readers) and the triage list (board-md), so the two never read a row differently. */
+export function markdownTables(md) {
+  const lines = String(md).split("\n").map((l) => l.trim());
+  // One character class, tested once: the old /^\|[\s:|-]*-[\s:|-]*$/ backtracked in quadratic time (Security, 2026-10-30).
+  const sepLine = (l) => l.startsWith("|") && l.includes("-") && /^[\s:|-]+$/.test(l);
+  const cellsOf = (l) => l.replace(/^\||(?<!\\)\|$/g, "").split(/(?<!\\)\|/).map((c) => c.trim());
+  const tables = [];
+  for (let k = 0; k < lines.length; k++) {
+    if (!lines[k].startsWith("|") || !sepLine(lines[k + 1] || "")) continue;
+    const t = { headLine: lines[k], head: cellsOf(lines[k]), rows: [] };
+    for (k += 2; k < lines.length && lines[k].startsWith("|"); k++) if (!sepLine(lines[k])) t.rows.push({ line: lines[k], cells: cellsOf(lines[k]) });
+    k--;
+    tables.push(t);
+  }
+  return tables;
+}

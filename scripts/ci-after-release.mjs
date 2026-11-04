@@ -7,8 +7,8 @@
 //   node ci-after-release.mjs <repo root> <released commit> [--runs <file.json>]
 //
 // For each failed job of the commit's CI runs (`gh run list --commit`, then the run's jobs) it adds
-// to `.redcell/board.json`: a found item that waits on the owner (`owner_act`), and a Yours line
-// with both sides. The same job red at the release before (from <git dir>/redcell/ci-releases.jsonl)
+// to `.harteburn/board.json`: a found item that waits on the owner (`owner_act`), and a Yours line
+// with both sides. The same job red at the release before (from <git dir>/harteburn/ci-releases.jsonl)
 // makes the item say so and ask for Product's triage. Then run board-md.mjs as usual.
 // --runs reads `[{name, conclusion, status, jobs: [{name, conclusion}]}]` from a file (tests).
 // Exit 0: all green, or the red ones are on the board · 2: a run is still going (read again later).
@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import { join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
+import { boardDir, stateDir } from "./paths.mjs";
 
 /** Failed jobs of a commit's runs, as "<workflow> / <job>". */
 export const failedJobs = (runs) => runs.flatMap((r) => (r.jobs || []).filter((j) => j.conclusion === "failure").map((j) => `${r.name} / ${j.name}`));
@@ -67,16 +68,16 @@ function main() {
   }
   let gitDir = git(["rev-parse", "--git-common-dir"]);
   if (!isAbsolute(gitDir)) gitDir = join(root, gitDir);
-  const hist = join(gitDir, "redcell", "ci-releases.jsonl");
+  const hist = join(stateDir(gitDir), "ci-releases.jsonl");
   const rows = existsSync(hist) ? readFileSync(hist, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.sha !== full) : [];
   const previous = rows.at(-1)?.failed || [];
-  mkdirSync(join(gitDir, "redcell"), { recursive: true });
+  mkdirSync(stateDir(gitDir), { recursive: true });
   if (!going.length) appendFileSync(hist, JSON.stringify({ sha: full, at: new Date().toISOString(), failed }) + "\n");
   if (!failed.length) {
     console.log(`CI green for ${full.slice(0, 8)}: ${runs.map((r) => r.name).join(", ")}`);
     return;
   }
-  const f = join(root, ".redcell", "board.json");
+  const f = join(boardDir(root), "board.json");
   const rec = JSON.parse(readFileSync(f, "utf8"));
   const added = addToBoard(rec, full, failed, previous, new Date().toISOString().slice(0, 10));
   if (added.length) writeFileSync(f, JSON.stringify(rec, null, 2) + "\n");

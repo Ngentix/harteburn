@@ -49,13 +49,15 @@ fi
 
 If the gate has a "docs only, nothing to verify" early exit, run the brief test **before** it. Architecture edits are usually docs-only.
 
+In a repo with a security-domain table, HarteBurn's own check is `.git/hooks/pre-push`, and the repo's hook is kept as `.git/hooks/pre-push.local`, which runs after it with the same input: put your gate there. A removed or changed `.git/hooks/pre-push` is put back before the agent's next command; only if that fails is the command refused, saying why. Where git runs hooks from another folder (a global or committed `core.hooksPath`, husky), nothing is written there: the session prints the shim to add, whose last line is `CLAUDE_CONFIG_DIR="<config>" exec node "<plugin>/hooks/harteburn-hook.mjs" pre-push "$0" "$@"`. It names this version's folder, so redo it after each update.
+
 **Pages follow the code.** Add a section to `docs/architecture/README.md` headed `## When you change code, update the page`, with a table `| code path | pages |`: each cell a comma-separated list of backticked entries, a path being a glob (`*` within a folder, `**` across), a page with no folder being in `docs/architecture/`, one starting with `/` at the repo root. Start with the paths whose pages are load-bearing: migrations → the data-model page, deploy and workflows → the deployment page and the runbook. Then run the brief test on **every** push, not only docs pushes, and give it the pushed range, since a code-only push is what leaves a page untrue. Connector Cloud's pre-push hook collects `pages_ranges` from the refs it is given (`case "$range" in *..*) pages_ranges+="$range " ;; esac`) and runs:
 
 ```sh
 if [ -f docs/architecture/BRIEF.md ]; then
   run_gate "architecture brief current, pages follow the code" \
     "run /brief (or --no-rule-change); for a page the map names, update it, or add a commit saying 'Pages-unchanged: <why>'" \
-    env REDCELL_PAGES_RANGE="$pages_ranges" node --test scripts/__tests__/brief.test.mjs
+    env HARTEBURN_PAGES_RANGE="$pages_ranges" node --test scripts/__tests__/brief.test.mjs
 fi
 ```
 

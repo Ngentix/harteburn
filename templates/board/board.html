@@ -139,7 +139,7 @@ function pieceEl(p, frozen){
   return el("div",{class:"item"+(st==="dropped"?" dropped":"")+(st==="doing"?" doing":"")},
     el("span",{class:"st s-"+st}, STATE_WORD[st]||st),
     el("div",{class:"text"}, `${p.n}. `, p.text, st==="doing" ? el("b",{class:"here-mark"}," ← here") : null,
-      el("div",{class:"note"}, `Check: ${p.check || "none"} · ${used} of ${p.timebox ?? "?"} min${over} · price ${p.price ?? "?"} min${added}${p.owner_call ? " · owner: " + p.owner_call : ""}`),
+      el("div",{class:"note"}, `Check: ${p.check || "none"} · ${used} of ${p.timebox ?? "?"} min${over} · price ${p.price ?? "?"} min${added}${p.owner_call ? " · owner: " + p.owner_call : ""}${p.holds_back ? " · holds back " + p.holds_back : ""}`),
       p.note ? el("div",{class:"note"}, p.note) : null));
 }
 function render(){
@@ -200,7 +200,8 @@ function render(){
   })));
 
   const label = Object.fromEntries(BEATS.map(([k,l]) => [k,l]));
-  const open = (cur.items || []).filter(i => !["done","dropped"].includes(stateOf(i)));
+  // a dropped regression of our own diff stays on the record (board-md keeps it): still open work
+  const open = (cur.items || []).filter(i => !["done","dropped"].includes(stateOf(i)) || (stateOf(i) === "dropped" && (i.regression === "y" || i.kind === "mistake")));
   const rank = i => (["doing","blocked","todo"].indexOf(stateOf(i)) + 4) % 4; // an unknown state last, as in board.md
   const work = el("div",{class:"panel"}, el("h2",{},`Open work (${open.length})`));
   if (open.length) work.append(el("div",{class:"group"}, open.map((x,n) => [x,n]).sort((a,b) => rank(a[0]) - rank(b[0]) || a[1] - b[1])

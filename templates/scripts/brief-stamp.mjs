@@ -14,7 +14,7 @@
 //   node scripts/brief-stamp.mjs --pages [<a>..<b> ...]
 //                                               exit 1 if code on the repo's map changed and none of
 //                                               its pages did (ranges from the args, else
-//                                               REDCELL_PAGES_RANGE, else the branch since origin/main
+//                                               HARTEBURN_PAGES_RANGE, else the branch since origin/main
 //                                               plus the working tree). Escape: a commit saying
 //                                               `Pages-unchanged: <why>` excuses the files it changed.
 //
@@ -42,11 +42,11 @@ import { fileURLToPath } from "node:url";
 export const BRIEF = "docs/architecture/BRIEF.md";
 export const COVERAGE = "docs/architecture/BRIEF-coverage.md";
 // The hook cuts any one context string at 10,000 characters, so a brief over one string's room is sent
-// in up to three parts, each split at a "## " heading (jg 2026-10-14: size is fine; never drop a rule for space).
-export const MAX_BRIEF_CHARS = 29000; // three hook parts of 10,000 less their heads (19,400 in two until jg, 2026-10-19)
+// in up to four parts, each split at a "## " heading (jg 2026-10-14: size is fine; never drop a rule for space).
+export const MAX_BRIEF_CHARS = 38000; // four hook parts of 10,000 less their heads, 38,744 (29,000 in three until 2026-10-30; 19,400 in two until jg, 2026-10-19)
 export const HOOK_CAP = 10000;
-export const MAX_PARTS = 3; // the parts the plugin's hooks.json sends: brief-session and brief-subagent 1–3
-// briefHead and briefParts must stay identical to the copies in the plugin's hooks/redcell-hook.mjs;
+export const MAX_PARTS = 4; // the parts the plugin's hooks.json sends: brief-session and brief-subagent 1–4
+// briefHead and briefParts must stay identical to the copies in the plugin's hooks/harteburn-hook.mjs;
 // the plugin's tests compare them.
 export const HOOK_HEAD =
   "ARCHITECTURE BRIEF for this repo (docs/architecture/BRIEF.md, compiled from the architecture pages; " +
@@ -337,7 +337,9 @@ export function changes(r, ranges = []) {
   return scope({ net: lines(git(r, ["diff", "--name-only", base])), commits: commitsIn(r, `${base}..HEAD`), extra });
 }
 
-export const envRanges = () => (process.env.REDCELL_PAGES_RANGE || "").split(/\s+/).filter(Boolean);
+// This file is copied into each product repo on its own, so it reads the variable itself (the plugin reads
+// HARTEBURN_PAGES_RANGE too; a product that copies this template sets that name in its CI).
+export const envRanges = () => (process.env.HARTEBURN_PAGES_RANGE || "").split(/\s+/).filter(Boolean);
 export const tipsOf = (ranges) => [...new Set(ranges.map((x) => x.split("..").pop()))];
 
 // The brief's files as committed at `rev`, written to a throwaway directory.

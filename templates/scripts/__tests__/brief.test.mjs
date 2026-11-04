@@ -30,7 +30,7 @@ after(() => made.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 // A repo with architecture pages must have a current brief. A repo with none (the plugin's own) skips.
 const hasPages = existsSync(join(root(), "docs/architecture"));
-// A push (REDCELL_PAGES_RANGE set) is judged by the brief as committed at the pushed tip; the full gate
+// A push (HARTEBURN_PAGES_RANGE set) is judged by the brief as committed at the pushed tip; the full gate
 // by the working tree.
 test("this repo's brief is current, complete, and fits the hook cap", { skip: !hasPages && "no docs/architecture in this repo" }, () => {
   const problems = repoBrief(root());
@@ -38,7 +38,7 @@ test("this repo's brief is current, complete, and fits the hook cap", { skip: !h
 });
 
 // Code on the repo's map changed → one of its pages changed too (pre-push passes the pushed range in
-// REDCELL_PAGES_RANGE; a gate before merging checks the branch since origin/main plus the working tree).
+// HARTEBURN_PAGES_RANGE; a gate before merging checks the branch since origin/main plus the working tree).
 // The problems print as the failure's only text, so a hook that shows the last lines shows them.
 test("this repo's architecture pages follow its code", (t) => {
   if (!readPageMap(root()).length) return t.skip("no page map in docs/architecture/README.md");
@@ -180,8 +180,10 @@ test("a brief within the limit fits three parts wherever its headings fall", () 
   assert.ok(briefParts(atLimit).length <= MAX_PARTS);
 });
 
-test("the limit is what three hook parts hold, less their heads, in whole thousands", () => {
-  assert.equal(MAX_PARTS, 3, "three hook parts (jg 2026-10-19)");
+test("the limit is what four hook parts hold, less their heads, in whole thousands", () => {
+  assert.equal(MAX_PARTS, 4, "four hook parts (a project's brief outgrew three, 2026-10-30)");
+  // 4 × 9,686 = 38,744: 39,000 would pass the gate and need a fifth part the hook never sends
+  assert.equal(MAX_BRIEF_CHARS, 38000);
   // a part's room exactly as briefParts computes it: under the cap less 100, with its head
   const room = HOOK_CAP - 101 - briefHead(1, MAX_PARTS).length;
   assert.equal(MAX_BRIEF_CHARS, Math.floor((MAX_PARTS * room) / 1000) * 1000, `${MAX_PARTS} parts of ${room}`);
@@ -209,7 +211,7 @@ test("a push is judged by the brief it pushes, never by uncommitted edits in the
 
 test("a brief of exactly the limit passes; one character more fails", () => {
   const r = fixture();
-  const brief = (n) => "[B1] [B2]\n" + Array.from({ length: 60 }, (_, i) => `## S${i}\n` + "y".repeat(500)).join("\n").slice(0, n - 10);
+  const brief = (n) => "[B1] [B2]\n" + Array.from({ length: 80 }, (_, i) => `## S${i}\n` + "y".repeat(500)).join("\n").slice(0, n - 10);
   writeFileSync(join(r, "docs/architecture/BRIEF.md"), brief(MAX_BRIEF_CHARS));
   assert.equal(readFileSync(join(r, "docs/architecture/BRIEF.md"), "utf8").length, MAX_BRIEF_CHARS);
   assert.deepEqual(check(r), []);
@@ -396,7 +398,7 @@ test("a push is judged by the page map it pushes, never by the tree's map", () =
 
 // The env glue, end to end: this test file and the CLI, spawned in a throwaway repo with and without a
 // pushed range (the Prover showed the glue could be removed with every other test green).
-test("spawned with a pushed range, the gate judges the pushed commit; without one, the tree", { skip: process.env.REDCELL_SPAWNED && "inside a spawned run" }, () => {
+test("spawned with a pushed range, the gate judges the pushed commit; without one, the tree", { skip: process.env.HARTEBURN_SPAWNED && "inside a spawned run" }, () => {
   const r = fixture();
   const here = dirname(fileURLToPath(import.meta.url));
   mkdirSync(join(r, "scripts/__tests__"), { recursive: true });
@@ -414,7 +416,7 @@ test("spawned with a pushed range, the gate judges the pushed commit; without on
   // NODE_TEST_CONTEXT is how node:test spots a nested run; left in, the child skips its files and exits 0.
   const { NODE_TEST_CONTEXT, ...env } = process.env;
   const run = (args, range) =>
-    spawnSync("node", args, { cwd: r, encoding: "utf8", env: { ...env, REDCELL_SPAWNED: "1", REDCELL_PAGES_RANGE: range ?? "" } });
+    spawnSync("node", args, { cwd: r, encoding: "utf8", env: { ...env, HARTEBURN_SPAWNED: "1", HARTEBURN_PAGES_RANGE: range ?? "" } });
   const pushed = run(["--test", "--test-reporter=spec", "scripts/__tests__/brief.test.mjs"], `${c1}..${c2}`);
   assert.notEqual(pushed.status, 0, "the pushed commit's brief is stale");
   assert.match(pushed.stdout, /stale — docs\/architecture\/01-a\.md changed .*\(at /);
@@ -447,7 +449,7 @@ test("a push of two branches is judged range by range, each against its own tip'
 
 // The guard above, proven: this file run again with GIT_DIR naming a decoy repository leaves the decoy
 // exactly as it was (its refs, HEAD and config). The run inside skips this test.
-test("its throwaway repos never touch a repository a hook's GIT_DIR names", { skip: process.env.REDCELL_DECOY_CHILD === "1" && "the run inside" }, () => {
+test("its throwaway repos never touch a repository a hook's GIT_DIR names", { skip: process.env.HARTEBURN_DECOY_CHILD === "1" && "the run inside" }, () => {
   const decoy = mkdtempSync(join(tmpdir(), "decoy-"));
   const d = (...a) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-C", decoy, ...a], { encoding: "utf8" }).trim();
   d("init", "-q", "-b", "main");
@@ -460,7 +462,7 @@ test("its throwaway repos never touch a repository a hook's GIT_DIR names", { sk
   const { NODE_TEST_CONTEXT, ...env } = process.env;
   const run = spawnSync(process.execPath, ["--test", fileURLToPath(import.meta.url)], {
     encoding: "utf8",
-    env: { ...env, GIT_DIR: join(decoy, ".git"), REDCELL_DECOY_CHILD: "1" },
+    env: { ...env, GIT_DIR: join(decoy, ".git"), HARTEBURN_DECOY_CHILD: "1" },
   });
   assert.match(run.stdout || "", /# pass [1-9]/, "the run inside ran its tests:\n" + (run.stdout || "").slice(-1000));
   assert.equal(state(), before, "the decoy repository changed:\n" + (run.stdout || "").slice(-2000));

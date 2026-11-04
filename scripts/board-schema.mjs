@@ -9,6 +9,9 @@
 // items in beat `prd` never rendered. The page showed 0 minutes for every beat.
 
 import { randomBytes } from "node:crypto";
+import { seatSnapshot } from "./seats.mjs";
+import { roleOf } from "./paths.mjs";
+import { markdownTables } from "./walkthrough.mjs";
 
 /** [key, label, default timebox in minutes]. `prd` shows in the beat line only when the record has it. */
 export const BEATS = [
@@ -34,7 +37,10 @@ export const KEYS = {
   record: ["id", "title", "project", "status", "opened_at", "closed_at", "updated_at", "done_when", "frame", "roles",
     "beats", "items", "pieces", "pieces_at_slices", "scope", "yours", "checkpoint", "runs", "session_model", "log_count", "work",
     // Retro 2026-10-28 (a 2026-10-28 product retro, ch ratified Change 2): the objective's token budget, set at Frame.
-    "budget_tokens"],
+    "budget_tokens",
+    // Retro 2026-10-28 (connector-cloud FEA-CC-456, jg ratified Change 3): the providers the objective
+    // adds, set at Frame, and Ready's live calls to each ({provider, call, resource, shape, at}).
+    "providers", "live_reads"],
   // `built`: where the work stands proven before production ("stub: kits_admin 17/17"), so the line
   // reads ◐ built, not yet in production, until its own proof makes it done (jg 2026-10-22).
   // `read_by` + `earliest` (retro 2026-10-23, jg ratified): who can read the line's proof
@@ -47,19 +53,24 @@ export const KEYS = {
   work: ["text", "state"],
   // `owner_act` (retro 2026-10-25, jg ratified Change 2): the act only the owner can do that this
   // item waits on ("grant CI read on the ghcr.io copies"); the board refuses it with no Yours line.
-  item: ["id", "beat", "text", "state", "note", "kind", "owner_act"],
+  // `regression` "y" | "n" (retro 2026-10-28, connector-cloud FEA-CC-456, jg ratified Change 2): the
+  // Prover's tag, did this diff make it (measured against the diff's base).
+  item: ["id", "beat", "text", "state", "note", "kind", "owner_act", "regression"],
   // `kind` "prod-fix": a production fix, its own piece, released at once, never riding a feature
   // piece. `replans`: [{at: "<who> <YYYY-MM-DD>", price, why, text?}], the owner's re-price, split
   // or re-scope of a started piece (retro 2026-10-25, jg ratified Change 1).
   // `design` "consult" | "full", `mockup` "<who> YYYY-MM-DD: <link>" (the owner's approved blend),
   // `screens` [{name, fidelity}] (the Designer's verdict per visible screen at Done) (jg 2026-10-27).
-  piece: ["n", "text", "check", "price", "timebox", "state", "started_at", "ended_at", "go", "owner_call", "note", "kind", "replans", "design", "mockup", "screens"],
+  piece: ["n", "text", "check", "price", "timebox", "state", "started_at", "ended_at", "go", "owner_call", "note", "kind", "replans", "design", "mockup", "screens",
+    // `holds_back`: a piece added after Slices says what it delays and by how long ("<what> by ~N h").
+    "holds_back"],
   // `replans`: [{at: "<who> YYYY-MM-DD", timebox, why}], a beat's new timebox once it runs past 2×
   // (retro 2026-10-28, jg ratified Change 1).
   beat: ["key", "timebox", "used", "state", "started_at", "ended_at", "replans"],
   checkpoint: ["on_objective", "waiting", "can_ship"],
   scope: ["at", "change", "what", "why", "who", "price"],
   run: ["id", "at", "role", "model", "purpose", "tokens", "minutes"],
+  live_read: ["provider", "call", "resource", "shape", "at", "account"],
 };
 
 // Retro 2026-10-21 (connector-cloud FEA-CC-452, jg ratified Changes 1, 2 and 7): the board refuses
@@ -92,6 +103,34 @@ export const WAITS_RULES_FROM = "2026-10-28";
 /** Records opened from this date: an open beat past 2× its timebox stops for a dated replan, as a piece
  * does (retro 2026-10-28, jg ratified Change 1: beats ran past 2× with no replan in 5 retros). */
 export const BEAT_RULES_FROM = "2026-10-29";
+/** Records opened from this date (retro 2026-10-28, connector-cloud FEA-CC-456, jg ratified Changes 2
+ * and 3): a regression of our own diff is never deferred, nor put on the triage list; a new provider
+ * widens Ready to 60 min and is called live before Slices prices it; a piece added after Slices says
+ * what it holds back. A filter dropped 21 correct members and was deferred as "no worse than prod";
+ * a provider met only by discovery ran Build 2,319 of 930 min. */
+export const LIVE_RULES_FROM = "2026-10-31";
+export const READY_PROVIDER_MIN = 60;
+export const LIVE_CALLS = ["sign-in", "list", "write"];
+const HOLDS_BACK = /\S.*\bby ~\d+(\.\d+)?\s*h\b/;
+/** A regression of our own diff (the Prover's "y", or a mistake row) put aside: dropped or blocked. */
+export const deferredRegression = (i) => (i?.regression === "y" || i?.kind === "mistake") && ["dropped", "blocked"].includes(i?.state);
+export const REGRESSION_COLUMN = /regression of this diff\?/i;
+/** The triage list's problems (`docs/triage.md`): each table has the `regression of this diff?` column,
+ * and no row is a regression of our own diff (fixed now, inside its piece). */
+export function triageRefusals(md) {
+  const out = [];
+  for (const t of markdownTables(md)) {
+    const col = t.head.findIndex((c) => REGRESSION_COLUMN.test(c));
+    if (col < 0) out.push(`docs/triage.md: the table "${t.headLine.slice(0, 60)}" has no \`regression of this diff?\` column: add it, each row the Prover's y or n`);
+    for (const { cells } of col < 0 ? [] : t.rows) {
+      const v = cells[col] ?? "";
+      const name = cells.filter((_, i) => i !== col).join(" · ").slice(0, 80);
+      if (v === "y") out.push(`docs/triage.md: "${name}" is a regression of this diff: remove the row and fix it inside its piece`);
+      else if (v !== "n") out.push(`docs/triage.md: "${name}" says "${v}" for regression of this diff?: y or n, the Prover's tag`);
+    }
+  }
+  return out;
+}
 export const DESIGNS = ["consult", "full"];
 // Two verdicts only: "ships with fixes" passed the old /^ships\b/ (RC-DESIGNER, 2026-10-27).
 const FIDELITY = /^(ships\.?\s*$|does not ship\s*:\s*\S)/i;
@@ -105,7 +144,7 @@ const MEASURED = /^(run\s*:\s*\S|estimate\b)/i;
 // while the ledger shows neither a live hook (a `session` row near or after its opening) nor a run
 // recorded by hand for it (`ledger-stop --manual`). That objective's ledger stayed empty for 30 runs.
 export const HOOKS_RULES_FROM = "2026-10-29";
-export const HOOKS_REFUSAL = "the ledger shows no HarteBurn hook in this session and no run recorded by hand: the plugin's hooks are not running here. Record each role run after its result (`node <plugin>/hooks/redcell-hook.mjs ledger-stop --manual <role> \"<purpose>\" <tokens> <ms>`) and run board-md.mjs after every record edit";
+export const HOOKS_REFUSAL = "the ledger shows no HarteBurn hook in this session and no run recorded by hand: the plugin's hooks are not running here. Record each role run after its result (`node <plugin>/hooks/harteburn-hook.mjs ledger-stop --manual <role> \"<purpose>\" <tokens> <ms>`) and run board-md.mjs after every record edit";
 /** True when the ledger proves runs reach it for `rec`: a session row from a day before its opening on, or a manual row for it. */
 export function hooksLive(rec, ledger) {
   const opened = Date.parse(String(rec?.opened_at || "")) || 0;
@@ -133,13 +172,14 @@ const PROVEN = new RegExp(`^(${PROVEN_WHERE.join("|")})\\s*:\\s*\\S`, "i");
  * What the board refuses, one sentence each, on a normalized record. board-md.mjs shows them at the
  * board's top and exits 1, so the Tech Lead's own command fails until the record is put right.
  */
-export function refusals(rec, now = Date.now(), { stamps, ledger } = {}) {
+export function refusals(rec, now = Date.now(), { stamps, ledger, accounts = [] } = {}) {
   const out = [];
   if (!rec?.title) return out;
   const openedDay = String(stamps?.opened_at ?? rec.opened_at ?? "").slice(0, 10);
   if (Array.isArray(ledger) && openedDay >= HOOKS_RULES_FROM && !["done", "closed"].includes(rec.status) && !hooksLive({ ...rec, opened_at: stamps?.opened_at ?? rec.opened_at }, ledger)) out.push(HOOKS_REFUSAL);
   const pieces = rec.pieces || [];
-  const open = (rec.items || []).filter((i) => OPEN.includes(i.state)).length + pieces.filter((p) => OPEN.includes(p.state)).length;
+  const keeps = String(stamps?.opened_at ?? rec.opened_at ?? "").slice(0, 10) >= LIVE_RULES_FROM;
+  const open = (rec.items || []).filter((i) => OPEN.includes(i.state) || (keeps && deferredRegression(i))).length + pieces.filter((p) => OPEN.includes(p.state)).length;
   if (open > MAX_OPEN_ROWS) out.push(`${open} open rows, more than ${MAX_OPEN_ROWS}: finish or drop some; a find that blocks no piece goes on its priced list, or becomes a piece by the owner's dated go`);
   // Retro 2026-10-25 (jg ratified Change 2): CI's docker job on main was red 8 times over 4 days;
   // "the lasting fix is the owner's" sat in a troubleshooting doc and reached jg only when /done
@@ -281,6 +321,41 @@ export function refusals(rec, now = Date.now(), { stamps, ledger } = {}) {
       });
     });
   }
+  if (String(stamps?.opened_at ?? rec.opened_at ?? "").slice(0, 10) >= LIVE_RULES_FROM) {
+    for (const i of rec.items || []) {
+      const what = `"${String(i.text || "").slice(0, 50)}"`;
+      if (i.regression != null && !["y", "n"].includes(i.regression)) out.push(`${what} has regression "${i.regression}": "y" or "n", the Prover's tag (did this diff make it, measured against the diff's base)`);
+      else if (i.regression == null && i.kind === "found" && OPEN.includes(i.state)) out.push(`${what} is a find with no regression tag: add "regression": "y" or "n" (did this diff make it, measured against the diff's base)`);
+      if (deferredRegression(i)) out.push(`${what} is a regression of this diff: set its state to todo or doing and fix it inside its piece; it is never dropped or blocked`);
+    }
+    const providers = (Array.isArray(rec.providers) ? rec.providers : []).filter((p) => String(p || "").trim());
+    const readyBeat = (rec.beats || []).find((b) => b.key === "ready");
+    if (providers.length && readyBeat && currentTimebox(readyBeat) < READY_PROVIDER_MIN) {
+      out.push(`This objective adds a provider (${providers.join(", ")}): Ready's timebox is ${READY_PROVIDER_MIN} min, not ${currentTimebox(readyBeat)} ("timebox": ${READY_PROVIDER_MIN} on the ready beat)`);
+    }
+    const slicing = ["here", "done"].includes(slices?.state) || pieces.length > 0;
+    if (providers.length && slicing) {
+      const reads = Array.isArray(rec.live_reads) ? rec.live_reads : [];
+      for (const p of providers) {
+        const missing = LIVE_CALLS.filter((c) => !reads.some((r) => r?.provider === p && r?.call === c && String(r?.resource || "").trim() && String(r?.shape || "").trim()));
+        if (missing.length) out.push(`Provider "${p}" has no live ${missing.join(", ")} from Ready: before Slices prices pieces, make each call for real, per Done-line resource, through the project's own local client, and log each reply's shape in "live_reads" ({"provider", "call", "resource", "shape", "at"}; a write also its "account")`);
+        // Security on 6600ccd (F1): a live write goes only to a test or sandbox account the owner names on
+        // Yours, never a customer's or production account: an agent would otherwise write with any key it found.
+        for (const r of reads.filter((r) => r?.provider === p && r?.call === "write")) {
+          // Named only by the owner's own message (board-security.mjs namedAccounts), never a typed line: a
+          // Yours line, the provider's name or one letter all passed a text match (Security F1-r2).
+          const acct = String(r?.account || "").trim();
+          const named = (accounts || []).some((a) => a?.provider === p && String(a?.account || "") === acct);
+          if (!acct || !named) {
+            out.push(`Provider "${p}"'s live write ${acct ? `went to "${acct}", an account the owner has not named` : "names no account"}: a live write goes only to a test or sandbox account the owner names before the write, by sending alone in one message "test account ${p}: <account>", never a customer's or production account; ask the owner on Yours, then write its "account"`);
+          }
+        }
+      }
+    }
+    if (typeof n === "number") {
+      for (const p of pieces) if (p.n > n && !HOLDS_BACK.test(String(p.holds_back || ""))) out.push(`Piece ${p.n} was added after Slices: say what it holds back and by how long, for the owner ("holds_back": "<what> by ~<n> h")`);
+    }
+  }
   // A run is the ledger's, never typed (Lead close-out, 2026-10-21): a typed run sits beside the
   // ledger's copy of the same dispatch and is counted twice; 0.14.0's /frame told the Tech Lead to type them.
   const seen = new Set();
@@ -294,7 +369,7 @@ export function refusals(rec, now = Date.now(), { stamps, ledger } = {}) {
 
 /**
  * The board's own stamps (Lead ruling, 2026-10-21): rule inputs the board witnessed itself, kept in
- * a store only board-md.mjs writes (`<git dir>/redcell/stamps-<id>.json`), never the record the
+ * a store only board-md.mjs writes (`<git dir>/harteburn/stamps-<id>.json`), never the record the
  * Tech Lead edits. The board never trusts a value an ordinary edit can change; a deliberate edit is
  * shown, not stopped (no file can stop one: the Tech Lead writes the record, the git dir and the
  * plugin). `s` is that store, changed in place:
@@ -308,9 +383,9 @@ export function refusals(rec, now = Date.now(), { stamps, ledger } = {}) {
  *   saw (`security`, `refused`); all but the start, `from_head`, `from_local` and `refused` are cleared
  *   if it reopens.
  * The record's copies are rewritten from the store, so editing or deleting a stamp changes nothing,
- * and an open piece's minutes always run from its first start. Returns the problems it found.
+ * and an open piece's minutes run from its first start, unless it was parked and restarts (below). Returns the problems it found.
  */
-export function applyStamps(rec, s, now = new Date(), { head, local } = {}) {
+export function applyStamps(rec, s, now = new Date(), { head, local, securityRuns } = {}) {
   const out = [];
   const at = now.toISOString();
   const fresh = s.opened_at == null;
@@ -333,12 +408,39 @@ export function applyStamps(rec, s, now = new Date(), { head, local } = {}) {
   for (const p of rec.pieces || []) {
     if (p.n == null) continue;
     const st = (s.pieces[p.n] ||= {});
+    // A started piece set back to todo is parked (rc-security piece 4-0). Judged here, before a todo
+    // piece's security stamp is cleared below: one that saw a verdict is never re-stamped.
+    if (p.state === "todo" && st.started_at) st.parked = st.parked !== false && !st.security && !st.refused?.length;
     // The commit a piece started from (rc-security piece 3): its diff is head..HEAD. Passed in by
     // the caller, so this stays pure; a piece started before 0.23.2 has none and is never held.
     if (p.state === "doing" && !st.started_at) {
       st.started_at = at;
       if (head) st.head = head;
     }
+    // A parked piece restarts at its restart, only when a later piece started from its own start
+    // commit and range start (so it has no commit of its own): its old range then sits in that later
+    // piece's, which ends here, and nothing leaves every range (Architect, round 8). A Security run on
+    // this record between the two starts could be this piece's alone, so it keeps its start; with no
+    // list of runs, so does every piece (automated review of d5fa721).
+    if (p.state === "doing" && st.parked != null) {
+      const begun = Date.parse(String(st.started_at));
+      const later = st.parked && head && Array.isArray(securityRuns) && (rec.pieces || []).some((q) => {
+        const sq = s.pieces[q.n];
+        const next = Date.parse(String(sq?.started_at ?? ""));
+        return q.n !== p.n && sq?.head === st.head && sq.from_head === st.from_head && next > begun &&
+          !securityRuns.some((ts) => !(Date.parse(ts) < begun || Date.parse(ts) >= next));
+      });
+      if (later) {
+        st.started_at = at;
+        st.head = st.from_head = head;
+        if (local) st.from_local = local;
+        else delete st.from_local;
+      }
+      delete st.parked;
+    }
+    // The Done lines, scope and architecture commit this piece started with (hb-seats-1 piece 4).
+    // Stamped once: a piece already underway gets today's tree, and only a later edit is held.
+    if (st.started_at && !st.seat) st.seat = seatSnapshot(rec, head || st.head || "");
     // The scope a piece started with (retro 2026-10-25, Change 1); a dated replan's text is the new one.
     if (st.started_at && st.text == null) st.text = p.text ?? "";
     const rescoped = [...(p.replans || [])].reverse().find((r) => r?.text && DATED.test(String(r?.at || "")) && r?.price > 0)?.text;
@@ -415,12 +517,14 @@ export function runsFromLedger(rec, ledgerRows) {
     if (row.event === "stop") continue;
     // A touch row (rc-disk piece 4) names another repo the objective changed; it is not a run.
     if (row.event === "touch") continue;
+    // The owner's own rows (an acceptance, a named test account) are not runs.
+    if (row.event === "accept" || row.event === "account") continue;
     const id = ledgerId(row);
     if (have.has(id)) continue;
     rec.runs.push({
       id,
       at: row.ts,
-      role: String(row.role || "general-purpose").replace(/^(?:redcell|harteburn):/, ""),
+      role: roleOf(row.role) || String(row.role || "general-purpose"),
       model: row.model || "inherit",
       purpose: row.description || "",
       ...(row.tokens != null && { tokens: row.tokens }),
@@ -526,6 +630,7 @@ export function normalize(rec) {
   }
   (o.scope || []).forEach((s, n) => unknownKeys(s, KEYS.scope, `scope change ${n + 1}`, warnings));
   (o.runs || []).forEach((r, n) => unknownKeys(r, KEYS.run, `run ${n + 1}`, warnings));
+  (Array.isArray(o.live_reads) ? o.live_reads : []).forEach((r, n) => unknownKeys(r, KEYS.live_read, `live read ${n + 1}`, warnings));
   return { record: o, warnings };
 }
 

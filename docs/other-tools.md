@@ -47,7 +47,7 @@ What it writes:
 | `.github/agents/harteburn-*.agent.md`, `.github/prompts/harteburn-*.prompt.md` | GitHub Copilot |
 | `.codex/agents/harteburn-*.toml` | Codex |
 | `GEMINI.md`, `.gemini/agents/harteburn-*.md` | Gemini CLI |
-| `scripts/harteburn/prove-prompt.mjs` | `/prove` in every tool: builds the Prover's brief from the walkthrough and the diff only |
+| `scripts/harteburn/prove-prompt.mjs`, `scripts/harteburn/walkthrough.mjs` | `/prove` in every tool: builds the Prover's brief from the walkthrough and the diff only. **Known issue:** it also imports `board-security.mjs` and `paths.mjs`, which the export does not copy, so it does not run yet; use `node ~/ngentix/harteburn/scripts/prove-prompt.mjs` from a checkout ([limitations](limitations.md)) |
 
 The product repo also needs its own half, the same as for Claude Code: house rules, brief, gate. See [adding a product](adding-a-product.md).
 
@@ -55,7 +55,7 @@ The product repo also needs its own half, the same as for Claude Code: house rul
 
 The exported files carry a copy of the brief. When the brief changes, they go stale. Two guards:
 
-- `node ~/ngentix/harteburn/scripts/export.mjs tools --check` exits 1 and names every stale file. Run it next to the brief gate in the product repo's pre-push hook, so a recompiled brief can't leave the exports behind.
+- `node ~/ngentix/harteburn/scripts/export.mjs tools --check` exits 1 and names every stale file. Run it next to the brief gate in the product repo's pre-push hook, so a recompiled brief can't leave the exports behind. In a repo with a security-domain table, that hook is `.git/hooks/pre-push.local`: HarteBurn's own check is `.git/hooks/pre-push`, and runs yours after it passes.
 - Every generated file says on its first lines that it's generated, and from what. Edit the sources, never the output.
 
 ## Recompiling the brief outside Claude Code

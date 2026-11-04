@@ -6,6 +6,7 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { phone } from "./phone.mjs";
 import { readLicense, licenseHome } from "./login.mjs";
+import { boardDir, stateDir } from "./paths.mjs";
 
 const BOARD_ID = /[^A-Za-z0-9._-]/g;
 export const LEDGER_FIELDS = ["ts", "event", "role", "board", "tokens", "minutes", "model"];
@@ -25,7 +26,7 @@ function syncedLicense(root, opts) {
 export async function pushBoard(root, opts = {}) {
   const { lic, reason } = syncedLicense(root, opts);
   if (!lic) return { sent: false, reason };
-  const src = join(root, ".redcell", "board.json");
+  const src = join(boardDir(root), "board.json");
   if (!existsSync(src)) return { sent: false, reason: "no board" };
   const record = JSON.parse(readFileSync(src, "utf8"));
   const id = String(record.id || "board").replace(BOARD_ID, "").slice(0, 80) || "board";
@@ -41,9 +42,9 @@ function trimRow(row) {
 export async function pushLedger(root, opts = {}) {
   const { lic, reason } = syncedLicense(root, opts);
   if (!lic) return { sent: false, reason };
-  const file = join(root, ".git", "redcell", "ledger.jsonl");
+  const file = join(stateDir(join(root, ".git")), "ledger.jsonl");
   if (!existsSync(file)) return { sent: false, reason: "no ledger" };
-  const cursorFile = join(root, ".git", "redcell", "ledger.sent");
+  const cursorFile = join(stateDir(join(root, ".git")), "ledger.sent");
   const last = existsSync(cursorFile) ? readFileSync(cursorFile, "utf8").trim() : "";
   const fresh = readFileSync(file, "utf8").split("\n").filter(Boolean).flatMap((line) => {
     try { return [JSON.parse(line)]; } catch { return []; }

@@ -5,7 +5,7 @@
 //
 //   node piece-pack.mjs <prd.md> --steps <a-b> [--base <git ref>] [--ready <file>]... [--max-kb <n>]
 //
-// Writes <git dir>/redcell/pack-<a>-<b>.md and prints its path and size. The pack holds, in order:
+// Writes <git dir>/harteburn/pack-<a>-<b>.md and prints its path and size. The pack holds, in order:
 //   - the repo's docs/architecture/BRIEF.md (house rules compiled), verbatim;
 //   - the PRD's §0 steps a..b only (prove-prompt.mjs's walkthrough and keepSteps);
 //   - each --ready file (the Architect's Ready ruling for the piece), verbatim;
@@ -18,6 +18,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, resolve, isAbsolute } from "node:path";
 import { walkthrough, stepRanges, keepSteps } from "./walkthrough.mjs";
+import { stateDir } from "./paths.mjs";
 
 const args = process.argv.slice(2);
 const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
@@ -63,7 +64,7 @@ const out = parts.join("\n");
 const kb = Buffer.byteLength(out) / 1024;
 const max = Number(opt("--max-kb") ?? 120);
 if (kb > max) fail(`refused: the pack is ${kb.toFixed(0)} KB, over --max-kb ${max} (~${Math.round(max / 4)}k tokens). Narrow the steps or the Ready files.`, 1);
-mkdirSync(join(gitDir, "redcell"), { recursive: true });
-const file = join(gitDir, "redcell", `pack-${a}-${b}.md`);
+mkdirSync(stateDir(gitDir), { recursive: true });
+const file = join(stateDir(gitDir), `pack-${a}-${b}.md`);
 writeFileSync(file, out);
 console.log(`${file}\t${kb.toFixed(1)} KB (~${Math.round((kb * 1024) / 4 / 1000)}k tokens)`);

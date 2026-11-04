@@ -59,7 +59,7 @@ Changes above exist.>
 
 **Done lines:** <each `done_when` line, its state, its evidence>
 
-**From the log** (`<git dir>/redcell/log-<id>.jsonl`): <N finished items; each `found` and
+**From the log** (`<git dir>/harteburn/log-<id>.jsonl`): <N finished items; each `found` and
 `mistake` row, with its cost>
 
 **Scope changes:** <each: added / dropped / changed — what — why — who — when>

@@ -1,21 +1,22 @@
 #!/usr/bin/env node
-// A ratified Change has a home. Core ships in the plugin. Project lives in the repo's .redcell/.
+// A ratified Change has a home. Core ships in the plugin. Project lives in the repo's .harteburn/.
 // User lives on this machine. A core Change built here is an override until it is submitted;
 // a plugin update does not carry it, and does not delete it.
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { BOARD_DIR, LEGACY, boardDir, homeDir } from "./paths.mjs";
 
 export function userHome(env = process.env) {
-  return env.REDCELL_HOME || join(homedir(), ".claude", "redcell");
+  return homeDir(env);
 }
 
 /** core | project | user, from the place the retro named. */
 export function layerOf(where = "") {
   const w = String(where).toLowerCase();
   if (/\buser\b|this machine/.test(w)) return "user";
-  if (/house rule|\.redcell|\bproject\b/.test(w)) return "project";
+  if (/house rule|\bproject\b/.test(w) || w.includes(BOARD_DIR) || w.includes(LEGACY.boardDir)) return "project";
   if (/\bcore\b|\bskill\b|\bcharter\b|\bhook\b|\bplugin\b/.test(w)) return "core";
   return "project";
 }
@@ -32,7 +33,7 @@ function writeList(path, rows) {
 }
 
 export function layerPath(layer, { root = process.cwd(), home = userHome() } = {}) {
-  if (layer === "project") return join(root, ".redcell", "changes.json");
+  if (layer === "project") return join(boardDir(root), "changes.json");
   if (layer === "user") return join(home, "changes.json");
   return join(home, "overrides.json");
 }

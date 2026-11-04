@@ -4,13 +4,13 @@
 //   node prove-prompt.mjs <prd.md> [--mode before|after] [--base <git ref>]
 //                         [--steps <a-b>] [--role builds|reads] [--list-steps]
 //
-// Writes <git dir>/redcell/prove-<timestamp>.md and prints its path. The file holds:
+// Writes <git dir>/harteburn/prove-<timestamp>.md and prints its path. The file holds:
 //   - the PRD's acceptance walkthrough (its "## 0." / "Acceptance Walkthrough" section, or the
 //     ACCEPTANCE-*.md it links to)
 //   - the commit under test (HEAD): the Prover moves its warm worktree there
 //   - for --mode after: `git diff <base>` of committed and uncommitted changes (default base:
 //     the merge-base with origin/main), plus the list of untracked files, and the builder's own
-//     mutation results from <git dir>/redcell/mutations.jsonl (one JSON object per line:
+//     mutation results from <git dir>/harteburn/mutations.jsonl (one JSON object per line:
 //     {guard, file, break, test, result}), or "none recorded"
 // A reading swarm (retro 2026-10-18, jg): --steps 4-6 keeps only those walkthrough steps (by
 // position, 1-based), --role marks the member: "builds" (the one that runs tests and mutations)
@@ -38,17 +38,20 @@
 // where its rule still lives. The brief carries the escapes, the fixtures' tags and the ledger.
 // The dispatcher passes the Prover only "Read <path> and follow it." Nothing else.
 
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, realpathSync } from "node:fs";
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, realpathSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, isAbsolute, resolve, relative, basename } from "node:path";
-import { walkthrough, stepRanges, keepSteps, screensOf, SCREEN_ROWS } from "./walkthrough.mjs";
+import { walkthrough, stepRanges, keepSteps, screensOf, SCREEN_ROWS, markdownTables } from "./walkthrough.mjs";
+import { proverPrompt } from "./board-security.mjs";
+import { createHash } from "node:crypto";
+import { stateDir } from "./paths.mjs";
 export { walkthrough, stepRanges, keepSteps, screensOf, SCREEN_ROWS };
 // Exported alone into product repos (scripts/harteburn/), where budgets.mjs and the loaded files are absent.
 // walkthrough.mjs is copied beside this file by the export.
 const { loadedFiles } = await import("./budgets.mjs").catch(() => ({ loadedFiles: () => [] }));
 
 const args = process.argv.slice(2);
-const VALUED = new Set(["--mode", "--base", "--steps", "--role", "--repass", "--verdict", "--lead-ruling", "--no-guards", "--ruling", "--removed", "--no-screens"]);
+const VALUED = new Set(["--mode", "--base", "--steps", "--role", "--repass", "--verdict", "--lead-ruling", "--no-guards", "--ruling", "--removed", "--no-screens", "--readers", "--no-new-outcome"]);
 const opt = (k) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
 const prdArg = args.find((a, i) => !a.startsWith("--") && !["before", "after"].includes(a) && !VALUED.has(args[i - 1]));
 const mode = opt("--mode") || "after";
@@ -84,6 +87,7 @@ if (args.includes("--list-steps")) {
 let walk = w.text;
 let stepsLine = "";
 let suffix = "";
+let swarmSteps = null;
 if (args.includes("--steps")) {
   const m = /^(\d+)(?:-(\d+))?$/.exec(opt("--steps") || "");
   if (!m) fail(`--steps takes a range such as 1-3 (or one step, 4), not "${opt("--steps") ?? ""}"`);
@@ -94,6 +98,7 @@ if (args.includes("--steps")) {
   walk = keepSteps(w.text, a, b);
   stepsLine = `Your steps: ${a === b ? a : `${a}–${b}`} of ${ranges.length}.\n`;
   suffix = `-steps-${a}-${b}`;
+  swarmSteps = { steps: [a, b], of: ranges.length };
 }
 
 const ROLES = {
@@ -114,7 +119,7 @@ const real = (p) => {
   }
 };
 // Each after-mode brief, the brief it re-passed (null for round 1), its round, PRD, steps and commit.
-const chainFile = () => join(gitDir, "redcell", "rounds.jsonl");
+const chainFile = () => join(stateDir(gitDir), "rounds.jsonl");
 const chain = () => (existsSync(chainFile()) ? readFileSync(chainFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
   try {
     return [JSON.parse(l)];
@@ -158,7 +163,7 @@ if (args.includes("--repass")) {
 const sha = git(["rev-parse", "HEAD"], root);
 // The warm worktree's commands (tidy pass 2026-10-28: moved here from the Prover's charter, since the
 // brief is all the Prover is given). A reading member never opens it.
-const wt = join(gitDir, "redcell", "prover-wt");
+const wt = join(stateDir(gitDir), "prover-wt");
 const worktreePart =
   `## Where you build: one warm worktree\n\n` +
   `- **The worktree** is \`${wt}\`. Create it once: \`git worktree add --detach ${wt} ${sha}\`. Each pass, move it: \`git -C ${wt} checkout --detach --force ${sha}\`, then \`git -C ${wt} clean -fd\`. Anything left in it is an earlier pass's: discard it this way, never \`git stash\` it. End the pass the same way, so the next one starts clean. No \`-x\`: its ignored build folder (\`target/\`, \`node_modules/\`) stays, so each build is incremental. The first time, set it up as the repo's \`CLAUDE.md\` says (packages, databases); later passes reuse it.\n` +
@@ -171,7 +176,7 @@ const commitLine =
 
 
 function mutationsPart(changed) {
-  const f = join(gitDir, "redcell", "mutations.jsonl");
+  const f = join(stateDir(gitDir), "mutations.jsonl");
   const rows = existsSync(f) ? readFileSync(f, "utf8").split("\n").filter((l) => l.trim()) : [];
   const head = "\n## The builder's own mutations\n\n";
   if (!rows.length) return head + `none recorded (\`${f}\` is missing or empty). Say so first: breaking its own guards is the builder's job before yours.\n`;
@@ -371,6 +376,7 @@ if (args.includes("--ruling")) {
 }
 
 let diffPart = "";
+let dispatch = null;
 if (mode === "after") {
   let base = opt("--base") || repassBase;
   if (!base) {
@@ -383,12 +389,20 @@ if (mode === "after") {
   const diff = git(["diff", base, "--", ".", ":(exclude)docs/architecture/BRIEF*.md"], root);
   const untracked = git(["ls-files", "--others", "--exclude-standard"], root);
   const changed = new Set([...git(["diff", "--name-only", base], root).split("\n"), ...untracked.split("\n")].filter(Boolean));
+  // The dispatch prompt names the commits and each changed file's sha256 as it is on disk now (rc-security
+  // piece 4, A1): the push gate counts this run's proven for a pushed commit whose files are the same.
+  // A swarm member names its steps; a slice's pass with --steps and no --role judges the whole change.
+  const baseSha = git(["rev-parse", "--verify", `${base}^{commit}`], root);
+  const files = [...changed].sort().map((p) => {
+    try { return [p, createHash("sha256").update(readFileSync(join(root, p))).digest("hex")]; } catch { return [p, null]; }
+  });
+  dispatch = (brief) => proverPrompt(baseSha, sha, files, role ? swarmSteps : null, brief);
   // Retro 2026-10-23 (jg ratified Change 2): the Prover broke every guard itself on KIT-001's pieces
   // 1–10 because the builder logged none, and 8 of 13 passes ran 11–19 min against 8. A first pass
   // starts only once the builder has broken its own guards on this diff's code.
   if (round === 1) {
     const code = [...changed].filter((f) => !/\.(md|txt)$/i.test(f) && !f.startsWith("docs/"));
-    const f = join(gitDir, "redcell", "mutations.jsonl");
+    const f = join(stateDir(gitDir), "mutations.jsonl");
     const logged = existsSync(f) ? readFileSync(f, "utf8").split("\n").filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : [];
     const covered = logged.some((m) => code.includes(typeof m.file === "string" && isAbsolute(m.file) ? relative(root, real(m.file)) : m.file));
     const why = opt("--no-guards");
@@ -403,7 +417,7 @@ if (mode === "after") {
   };
   // (a) Retro 2026-10-28 Change 2: a logged guard break names the ordinary ways around its guard.
   {
-    const f = join(gitDir, "redcell", "mutations.jsonl");
+    const f = join(stateDir(gitDir), "mutations.jsonl");
     const rows = existsSync(f) ? readFileSync(f, "utf8").split("\n").filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : [];
     const e = escapesListed(rows);
     if (e.guards && !e.listed) {
@@ -444,7 +458,7 @@ if (mode === "after") {
     const rules = ["CLAUDE.md", "AGENTS.md"].map((n) => join(root, n)).filter((p) => existsSync(p)).map((p) => readFileSync(p, "utf8")).join("\n");
     const testCommand = rules.match(/^\s*[-*]?\s*\**Test command:?\**:?\s*`?([^`\n]+?)`?\s*$/im)?.[1]?.trim();
     if (testCommand) {
-      const f = join(gitDir, "redcell", "mutations.jsonl");
+      const f = join(stateDir(gitDir), "mutations.jsonl");
       const rows = existsSync(f) ? readFileSync(f, "utf8").split("\n").filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : [];
       const ran = rows.some((m) => m.test_command === testCommand && typeof m.commit === "string" && m.commit.length >= 7 && sha.startsWith(m.commit));
       if (!ran) {
@@ -453,12 +467,59 @@ if (mode === "after") {
       }
     }
   }
+  // Retro 2026-10-28 (connector-cloud FEA-CC-456, jg ratified Change 1): two staff screens kept counting
+  // a new outcome the old way, and five piece-end reviews never read them. A first pass says whether the
+  // diff adds an outcome; if it does, each reader of it is listed (found by grep) and checked here.
+  let outcomesPart = "";
+  if (round === 1) {
+    const readers = opt("--readers");
+    const none = opt("--no-new-outcome");
+    const WHAT = "a check outcome, verdict, status or exclusion state";
+    if (args.includes("--readers") && args.includes("--no-new-outcome")) refuse(`refused: pass --readers <file> or --no-new-outcome "<why>", not both.`);
+    if (!args.includes("--readers") && !args.includes("--no-new-outcome")) {
+      refuse(`refused: say whether this diff adds an outcome (${WHAT}). If it does, pass --readers <file>: one row per view that counts or shows it, found by grep (| outcome | reader | found by |). If not, pass --no-new-outcome "<why>".`);
+    }
+    if (args.includes("--no-new-outcome") && !String(none ?? "").trim()) refuse(`refused: --no-new-outcome needs its reason: --no-new-outcome "<why this diff adds no ${WHAT}>".`);
+    if (readers != null) {
+      if (!existsSync(readers)) refuse(`refused: no file at --readers ${readers}. One row per view that counts or shows each new outcome: | outcome | reader | found by |.`);
+      const rows = markdownTables(readFileSync(readers, "utf8")).flatMap((t) => t.rows);
+      if (!rows.length) refuse(`refused: --readers ${readers} has no row. One row per view that counts or shows each new outcome: | outcome | reader | found by |.`);
+      // The list itself is never evidence: left untracked in the repo, its own rows would be "added lines".
+      const self = relative(root, real(resolve(process.cwd(), readers)));
+      const addedText = [...added].filter(([f]) => f !== self).flatMap(([, l]) => l).join("\n");
+      // A whole token, not a substring: a one-letter outcome would match any diff.
+      const holds = (o) => new RegExp(`${/^\w/.test(o) ? "(?<!\\w)" : ""}${o.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}${/\w$/.test(o) ? "(?!\\w)" : ""}`).test(addedText);
+      // A file inside the repo, by its real path: a repo-relative spelling, never a symlink out or a folder.
+      const inRepo = (p) => {
+        if (!p || isAbsolute(p)) return false;
+        try {
+          const r = relative(realpathSync(root), realpathSync(resolve(root, p)));
+          return Boolean(r) && !r.startsWith("..") && !isAbsolute(r) && statSync(join(root, r)).isFile();
+        } catch {
+          return false;
+        }
+      };
+      const bad = [];
+      for (const { line: row, cells } of rows) {
+        const [outcome, reader] = cells;
+        const path = String(reader || "").split(/[:\s]/)[0];
+        if (cells.length !== 3 || cells.some((c) => !c)) bad.push(`${row} (each row has an outcome, a reader and the grep that found it)`);
+        else if (!inRepo(path)) bad.push(`${row} (no ${path} in the repo)`);
+        else if (!holds(outcome)) bad.push(`${row} (this diff's added lines do not hold "${outcome}")`);
+      }
+      if (bad.length) refuse(`refused: --readers ${readers}: ${bad.join("; ")}.`);
+      outcomesPart = `\n## New outcomes and their readers\n\nThe builder's list (\`${resolve(process.cwd(), readers)}\`), one row per view that counts or shows a new outcome:\n\n${rows.map((r) => r.line).join("\n")}\n\nRender each reader once from one fixture run and assert they agree: one quantity, one answer. A reader that \`git grep\` finds for an outcome and the list leaves out is a defect, as are two readers that disagree.\n`;
+    } else {
+      outcomesPart = `\n## New outcomes and their readers\n\nThe builder says this diff adds no new outcome: "${none}". If the diff does add one (${WHAT}), that is a defect, and so is each reader of it left unread.\n`;
+    }
+  }
   diffPart =
     `\n\n## The change (git diff ${base.slice(0, 12)} — committed and uncommitted)\n\n` +
     "```diff\n" + diff + "\n```\n" +
     (untracked ? `\nUntracked files (read them directly):\n${untracked.split("\n").map((f) => "- " + f).join("\n")}\n` : "") +
     mutationsPart(changed) +
     readersPart(base) +
+    outcomesPart +
     fixturesPart +
     removedPart +
     rulingPart;
@@ -480,7 +541,7 @@ if (mode === "before") {
 const task =
   mode === "before"
     ? "Mode 1 (before the build): turn every walkthrough step into a failing test, run each, and confirm it fails for the right reason. Report one line per step."
-    : "Mode 2 (after the build): give one verdict on this change against the walkthrough: **proven**; **defect** (the code does not do a step: the only verdict that blocks); or **proven, gaps to pin** (the code is right, but a test stays green with its guard gone: list each, the builder pins it, no re-pass). Run the Readers and callers list once, each with its gate command, before your verdict. Test names, a red-on-removal, and the screen for anything a person sees. Sweep every guard your steps depend on and list every survivor, not only the first red; when two or more share a cause, name the class and its structural fix." +
+    : "Mode 2 (after the build): give one verdict on this change against the walkthrough: **proven**; **defect** (the code does not do a step: the only verdict that blocks); or **proven, gaps to pin** (the code is right, but a test stays green with its guard gone: list each, the builder pins it, no re-pass). Run the Readers and callers list once, each with its gate command, before your verdict. Test names, a red-on-removal, and the screen for anything a person sees. Sweep every guard your steps depend on and list every survivor, not only the first red; when two or more share a cause, name the class and its structural fix. Tag each find `regression of this diff? y/n`, measured against the diff's base (y: the base did not do it). A classifier or filter change carries a before/after count over every real input set it touches, each lost member named; a \"conforms\" without it is a defect." +
       (round > 1 ? ` This is round ${round}, after a defect: the brief carries the earlier verdict, and the diff runs only from the commit that round tested.` : "");
 
 const out =
@@ -494,9 +555,11 @@ const out =
   earlierPart +
   diffPart;
 
-mkdirSync(join(gitDir, "redcell"), { recursive: true });
-const file = join(gitDir, "redcell", `prove-${Date.now()}${suffix}.md`);
+mkdirSync(stateDir(gitDir), { recursive: true });
+const file = join(stateDir(gitDir), `prove-${Date.now()}${suffix}.md`);
 writeFileSync(file, out);
+// The Prover's whole dispatch prompt, beside the brief: /prove sends exactly this file's text.
+if (dispatch) writeFileSync(`${file}.prompt`, dispatch(file));
 // Every after-mode brief has its row, round 1 too, so /retro counts each pass per PRD and steps and a
 // fresh round 1 after a dispel shows as a restart (Lead ruling, 2026-10-21: refusing it would need a
 // verdict state this script does not hold).

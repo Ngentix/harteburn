@@ -8,14 +8,15 @@
 //   brief    the questions plus docs/architecture/BRIEF.md as the only reference
 //   control  the same questions with no reference
 // A third call, the judge, marks each answer against docs/architecture/BRIEF-questions.md.
-// Pass: brief >= 19 of 20 and control <= 5 of 20. Result: stdout, and <git dir>/redcell/brief-score.json.
+// Pass: brief >= 19 of 20 and control <= 5 of 20. Result: stdout, and <git dir>/harteburn/brief-score.json.
 
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, isAbsolute, basename } from "node:path";
+import { env, stateDir } from "./paths.mjs";
 
-const MODEL = process.env.REDCELL_MODEL || "claude-opus-5-5";
+const MODEL = env("MODEL") || "claude-opus-5-5";
 const PASS_WITH = 19;
 const MAX_CONTROL = 5;
 
@@ -95,7 +96,7 @@ const result = {
 
 let gitDir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: repo, encoding: "utf8" }).trim();
 if (!isAbsolute(gitDir)) gitDir = join(repo, gitDir);
-mkdirSync(join(gitDir, "redcell"), { recursive: true });
+mkdirSync(stateDir(gitDir), { recursive: true });
 writeFileSync(join(gitDir, "harteburn/brief-score.json"), JSON.stringify({ ...result, withBrief, control, marksWith, marksControl }, null, 1));
 
 console.log(`brief score: ${result.with_brief}/${result.questions} with the brief (pass >= ${PASS_WITH}), ${result.control}/${result.questions} without (pass <= ${MAX_CONTROL}) — ${result.pass ? "PASS" : "FAIL"}`);

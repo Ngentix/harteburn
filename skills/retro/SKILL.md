@@ -23,9 +23,9 @@ they say full**). Why each rule exists: `docs/history.md`.
 1. Copy `retros/TEMPLATE-retro.md` from the HarteBurn plugin repo to
    `retros/<YYYY-MM-DD>-retro-<project>-<topic>.md`.
 2. **Capture the checklist** from the local files, not the page: the record
-   (`.redcell/board.json`: Done lines, beats, scope changes, runs), the work log
-   (`<git dir>/redcell/log-<id>.jsonl`, one finished item per line; `ts: null` marks items finished before the log existed; count it, don't paste it) and
-   the dispatch ledger (`<git dir>/redcell/ledger.jsonl`). Section 7 gets the Done lines as they
+   (`.harteburn/board.json`: Done lines, beats, scope changes, runs), the work log
+   (`<git dir>/harteburn/log-<id>.jsonl`, one finished item per line; `ts: null` marks items finished before the log existed; count it, don't paste it) and
+   the dispatch ledger (`<git dir>/harteburn/ledger.jsonl`). Section 7 gets the Done lines as they
    ended, time per beat, and the `found` and `mistake` rows, each with its cost; section 8 the runs.
 3. Fill the rest from the record, not memory: time per beat against its timebox, each run's tokens
    and minutes, releases and production defects, Product's Done verdict.
@@ -45,7 +45,7 @@ they say full**). Why each rule exists: `docs/history.md`.
    field — a mechanism; memory or prose only when nothing can enforce it) · **How we'll know**. The owner
    answers yes / no / modify per Change.
 8b. **Where it lives.** `node scripts/layers.mjs --route "<where>"` prints `core`, `project` or `user`.
-   `project` writes `.redcell/changes.json`. `user` writes `changes.json` under `REDCELL_HOME`.
+   `project` writes `.harteburn/changes.json`. `user` writes `changes.json` under `HARTEBURN_HOME`.
    `core` writes `overrides.json` there: built on this machine, not carried by a plugin update, submitted
    only after 8c.
 8c. **Nothing leaves until the owner sees it.** `node scripts/redact.mjs <file>` prints Problem, Cause,

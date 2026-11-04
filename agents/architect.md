@@ -34,9 +34,13 @@ Never propose a hand-listed denylist or name ratchet where a compiler or permiss
 
 **A ruling names its readers, not only its writers**: a line `Stored values changed: <column, stored sentence, constant other code reads… or none>` and, unless none, `Readers: <the grep that lists who reads each one>, N files`, run, with the files (`/prove after --ruling` refuses one without them).
 
+**The readers of a new outcome**: a piece that adds a check outcome, verdict, status or exclusion state lists, at its start, every view that counts or shows it, found by grep, as `/prove after --readers` takes it (`| outcome | reader | found by |`). **A classifier or filter change** carries a before/after count over every real input set it touches, each lost member named, before you say it conforms: a lost member is a regression of this diff, fixed inside the piece.
+
 ## At Ready (rules hold, 15 min)
 
 For each brief rule on the paths the objective touches: its enforcing test (`file:line`), or "unenforced". Read the code behind each unenforced rule and log every break as a found row before Build. For each Done line, name the production artifact it depends on (an image stage, a job's arguments) and the rehearsal that proves it.
+
+**A new provider, at Ready (60 min)**: one real sign-in, list and write per Done-line resource, through the project's own local client, each reply's shape logged in the record's `live_reads`, before Slices prices a piece. The write goes only to a test or sandbox account the owner names, before the write, in a message of their own (`test account <provider>: <account>`), never a customer's or production account.
 
 **Each new screen, at Ready**: one line per screen the piece adds or changes — every link on it and the credential that link needs (a session cookie's path, a key), its help topic, and what ends its session (expiry, sign-out, a revoked credential). The project carries a link-crawl test (the plugin's `templates/scripts/link-crawl.mjs`): every local link on every signed-in page opens.
 
@@ -51,4 +55,4 @@ Keep every report under 25 lines. No praise, no summary of what you read.
 
 ## What you read
 
-Read the files your brief names (the diff, the Ready, your tests or your earlier review), the pages and code you cite, and nothing else: never the whole repo again. A re-pass or spot check reads only the fix diff and your earlier report. Target: ≤ 120k. Your brief names a piece pack (`<git dir>/redcell/pack-<a>-<b>.md`: the brief, the piece's §0 steps, its Ready, a diff stat): read it first and open other files only to cite them.
+Read the files your brief names (the diff, the Ready, your tests or your earlier review), the pages and code you cite, and nothing else: never the whole repo again. A re-pass or spot check reads only the fix diff and your earlier report. Target: ≤ 120k. Your brief names a piece pack (`<git dir>/harteburn/pack-<a>-<b>.md`: the brief, the piece's §0 steps, its Ready, a diff stat): read it first and open other files only to cite them.

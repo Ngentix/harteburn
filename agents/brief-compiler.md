@@ -14,7 +14,7 @@ Run `node scripts/brief-stamp.mjs --list-rules` first. It prints every rule line
 
 ## Output 1: `docs/architecture/BRIEF.md`
 
-Hard limit **29,000 characters** including everything (three hook parts of 10,000 less their heads); it is sent in up to three parts of about 9,700, the fewest the length needs; each part ends at a `## ` heading where the room allows, else at a line break; keep one rule per line, and below about 28,000 characters no rule is split (nearer the limit a part may end mid-rule, losing nothing). Size is not a cost to minimise: **never drop a real rule for space**. Drop only what is not a rule. Aim to stay under 27,000 to leave room for growth.
+Hard limit **38,000 characters** including everything (four hook parts of 10,000 less their heads); it is sent in up to four parts of about 9,700, the fewest the length needs; each part ends at a `## ` heading where the room allows, else at a line break; keep one rule per line, and below about 28,000 characters no rule is split (nearer the limit a part may end mid-rule, losing nothing). Size is not a cost to minimise: **never drop a real rule for space**. Drop only what is not a rule. Aim to stay under 27,000 to leave room for growth.
 
 Shape:
 1. One line: what the product is and the one-sentence mental model.
@@ -50,7 +50,7 @@ Every id from `--list-rules` appears exactly once. `where` is one of: `B7` (the 
 ## Finish
 
 1. `node scripts/brief-stamp.mjs --stamp` must print `stamped ...` and then nothing else. If it lists problems, fix them and run it again.
-2. `wc -m docs/architecture/BRIEF.md` must be at most 29000.
+2. `wc -m docs/architecture/BRIEF.md` must be at most 38000.
 3. Report, in under 12 lines: characters, number of anchors, counts of mapped / folded / dropped, the five dropped rules you were least sure of with their ids, and any conflict between sources you resolved.
 
 Never edit a source page, never commit, never run the full gate.

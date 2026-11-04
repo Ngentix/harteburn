@@ -7,7 +7,7 @@
 //   node leg.mjs end    <repo root>                 deployed (or the leg's own finish line)
 //   node leg.mjs report <repo root>                 one line per leg
 //
-// Rows go to <git common dir>/redcell/legs.jsonl. An intervention is noted while a leg is open; an
+// Rows go to <git common dir>/harteburn/legs.jsonl. An intervention is noted while a leg is open; an
 // escape (a defect found after "done") is noted after it ended and counts against the last ended leg.
 // Usage comes from ~/.claude.json `cachedUsageUtilization` (Claude Code's own cached read; it may lag).
 
@@ -16,6 +16,7 @@ import { execFileSync } from "node:child_process";
 import { join, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { stateDir } from "./paths.mjs";
 
 /** Weekly and five-hour usage %, from Claude Code's cached read, or nulls. */
 export function usage(home = homedir()) {
@@ -31,8 +32,8 @@ export function usage(home = homedir()) {
 export function legsFile(root) {
   let dir = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim();
   if (!isAbsolute(dir)) dir = join(root, dir);
-  mkdirSync(join(dir, "redcell"), { recursive: true });
-  return join(dir, "redcell", "legs.jsonl");
+  mkdirSync(stateDir(dir), { recursive: true });
+  return join(stateDir(dir), "legs.jsonl");
 }
 
 export function readRows(file) {

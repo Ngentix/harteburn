@@ -8,7 +8,7 @@ Every repo under HarteBurn has a **brief**: its architecture pages and house rul
 |---|---|---|
 | `docs/architecture/*.md` | the architecture pages, the source of truth | people |
 | `docs/_house-rules.md` | the owner's settled rules, one line each, dated, marked ⛔ or ⭐ | people, on the owner's dated word |
-| `docs/architecture/BRIEF.md` | the compiled brief, up to 29,000 characters | **only** the compiler |
+| `docs/architecture/BRIEF.md` | the compiled brief, up to 38,000 characters | **only** the compiler |
 | `docs/architecture/BRIEF-coverage.md` | the map: every rule line in the sources, and where it went | the compiler, then the stamp |
 | `docs/architecture/BRIEF-questions.md` | twenty questions with an answer key, written from the pages | people; a key is corrected only against a newer dated decision, and logged |
 | `scripts/brief-stamp.mjs` | check, stamp, list rules | copied from this repo's `templates/` |
@@ -48,7 +48,7 @@ The sources hold more rule lines than any summary repeats verbatim, so every one
 - **a source changed** since the brief was compiled (each source has its own sha256 in the map; a `last_verified:` date bump doesn't count)
 - **a rule line is unmapped**, meaning new or edited
 - a map entry points at an anchor the brief lacks, or is dropped without a reason
-- the brief is over 29,000 characters (within it, the split always fits the hook's three parts)
+- the brief is over 38,000 characters (within it, the split always fits the hook's four parts)
 
 **To fix:**
 
@@ -59,9 +59,9 @@ The sources hold more rule lines than any summary repeats verbatim, so every one
 
 The re-stamp **refuses** if any rule line is unmapped. "No rule changed" is checked mechanically, not taken on trust. Anyone can run the re-stamp without the plugin. A rule change needs someone with the plugin to run `/brief`.
 
-## Delivered in up to three parts
+## Delivered in up to four parts
 
-Claude Code cuts any one hook's context string at 10,000 characters, and does so silently. A brief longer than one string's room is therefore sent as **up to three strings** (two until 2026-10-19). A part holds about 9,700 characters, and a brief takes the fewest parts its length needs. Each part ends at its last `## ` heading that still lets the rest fit the parts left and leaves the part at least half full, else at its last such line break (one rule per line, so no rule is split), else where it is full; so a brief within the limit fits three parts wherever its headings fall, and no part but the last is under half full. The hook and the gate use the same split function, and HarteBurn's own tests prove the two copies agree, including at the boundary. Each part is labelled "part 1 of 3" and so on. Each `hooks.json` entry names its part and how many are sent (`brief-session 2 of 3`). A running session reads `hooks.json` once, at its start, so one started before 0.13.0 asks for two parts by bare number; its second part then carries the rest, cut loudly at the cap if it must be, never dropped silently. A brief over the limit that reaches the hook anyway is treated the same way in the last part.
+Claude Code cuts any one hook's context string at 10,000 characters, and does so silently. A brief longer than one string's room is therefore sent as **up to four strings** (three until 2026-10-30, two until 2026-10-19). A part holds about 9,700 characters, and a brief takes the fewest parts its length needs. Each part ends at its last `## ` heading that still lets the rest fit the parts left and leaves the part at least half full, else at its last such line break (one rule per line, so no rule is split), else where it is full; so a brief within the limit fits four parts wherever its headings fall, and no part but the last is under half full. The hook and the gate use the same split function, and HarteBurn's own tests prove the two copies agree, including at the boundary. Each part is labelled "part 1 of 4" and so on. Each `hooks.json` entry names its part and how many are sent (`brief-session 2 of 4`). A running session reads `hooks.json` once, at its start, so one started before 0.13.0 asks for two parts by bare number; its second part then carries the rest, cut loudly at the cap if it must be, never dropped silently. A brief over the limit that reaches the hook anyway is treated the same way in the last part.
 
 ## Proven faithful: the score
 
@@ -71,7 +71,7 @@ Claude Code cuts any one hook's context string at 10,000 characters, and does so
 2. **Without the brief, as a control.** The same questions, with no reference at all.
 3. **A separate judge** marks each answer against the key: correct only if it states the rule's substance.
 
-**Pass:** at least 19 of 20 with the brief, and at most 5 of 20 without. The control proves the answers come from the brief, not from general knowledge. The result goes to `.git/redcell/brief-score.json`.
+**Pass:** at least 19 of 20 with the brief, and at most 5 of 20 without. The control proves the answers come from the brief, not from general knowledge. The result goes to `.git/harteburn/brief-score.json`.
 
 A miss is fixed in the **compiler**, never by editing a question. Connector Cloud's history:
 

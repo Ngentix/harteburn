@@ -1,6 +1,5 @@
 node_modules/
-service/.env
 .DS_Store
-.redcell/board.json
-.redcell/board.md
-.redcell/handoff*.md
+.harteburn/board.json
+.harteburn/board.md
+.harteburn/handoff*.md

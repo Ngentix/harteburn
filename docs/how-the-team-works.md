@@ -26,7 +26,7 @@ A role is convened when the thing being changed is **in its domain**, never beca
 | Docs only, a dependency bump, or a bug with no trigger path and no customer word | | yes, if any code | no | no | no | a dependency bump: yes | no |
 | Money, release, branch, another repo, production data, reopening a decision | **the owner only**; no role decides these | | | | | | |
 
-The Tech Lead names which roles it convened, and which it excused and why, on the **first line** of every checklist. A ledger hook records every dispatch inside `.git/redcell/ledger.jsonl`, so that line can be checked against what actually ran.
+The Tech Lead names which roles it convened, and which it excused and why, on the **first line** of every checklist. A ledger hook records every dispatch inside `.git/harteburn/ledger.jsonl`, so that line can be checked against what actually ran.
 
 ## The loop: every objective (0.5.0, from the first retro)
 
@@ -35,17 +35,17 @@ Agile without the bookkeeping. Each beat is timeboxed; the Tech Lead (the main s
 | Beat | Who | Timebox | What it produces |
 |---|---|---|---|
 | **Frame** (`/frame`) | Product + Tech Lead | 10 min | The objective in production terms, with numbers (time, cost, what the persona sees). Product rejects what the product would reject. Each Done line lists its items, a write-end row for each item that moves data (every field the destination requires, and its source), and where it is proven (production, canary or stub). Every open Change from earlier retros joins the checklist. |
-| **Ready** | Tech Lead (+ Architect for new infrastructure) | 15 min | A full production snapshot of the rows involved; production-latency numbers per step; a rehearsal plan for new infrastructure; the Architect's rules-hold check on the touched paths |
-| **Slices** | Tech Lead (+ Lead's price for any bundle) | 5 min | Numbered pieces 1..N, each with its production check, a price in build minutes and a timebox, frozen (a piece added later needs the owner's dated go); the quick win ships first, alone; the Prover returns any Done line that cannot pass in this objective |
-| **Build + prove** | Prover tests first; Tech Lead builds; one proof pass per slice | per piece | A find joins only inside the piece it blocks, or as a new piece by the owner's dated go; otherwise it goes on a named, priced list (Product's triage). The builder breaks its own guards and lists their escapes first; guard removal only on guards that log does not cover, in the Prover's warm worktree, with a timeout; every survivor in one pass; the Architect runs in the same message as the Prover; a pass takes 8 minutes or less. A second dispel of one step goes to the Lead (≤ 5 min ruling), never a third automatic round |
+| **Ready** | Tech Lead (+ Architect for new infrastructure) | 15 min; 60 min when the record names `providers` | A full production snapshot of the rows involved; production-latency numbers per step; a rehearsal plan for new infrastructure; the Architect's rules-hold check on the touched paths. A new provider: one real sign-in, list and write, each a `live_reads` row with its resource and reply shape, before Slices prices a piece; the write goes only to an account the owner names first by sending, alone, `test account <provider>: <account>` |
+| **Slices** | Tech Lead (+ Lead's price for any bundle) | 5 min | Numbered pieces 1..N, each with its production check, a price in build minutes and a timebox, frozen (a piece added later needs the owner's dated go and says what it delays: `"holds_back": "<what> by ~N h"`); the quick win ships first, alone; the Prover returns any Done line that cannot pass in this objective |
+| **Build + prove** | Prover tests first; Tech Lead builds; one proof pass per slice | per piece | A find joins only inside the piece it blocks, or as a new piece by the owner's dated go; otherwise it goes on a named, priced list (Product's triage). Each find is tagged `regression of this diff? y/n`; a `y` or a `mistake` is fixed inside its piece, never dropped or blocked. A first `/prove after` needs `--readers <file>` or `--no-new-outcome "<why>"`. The builder breaks its own guards and lists their escapes first; guard removal only on guards that log does not cover, in the Prover's warm worktree, with a timeout; every survivor in one pass; the Architect runs in the same message as the Prover; a pass takes 8 minutes or less. A second dispel of one step goes to the Lead (≤ 5 min ruling), never a third automatic round |
 | **Done review** (`/done`) | Product, in production | 10 min | Done, or not done and why, against the Frame's numbers. A green gate is not done |
 | **Retro** (`/retro`) | Tech Lead, with the owner | 10 min | In `retros/`: lean (one page) by default, full (built from each role's own evaluation, written blind) or dismissed, **the owner's (or Product's) call**. The owner **ratifies** each Change (yes / no / modify) and every yes is built in the same session as a mechanism, not prose. **An objective is closed when its Done verdict and its retro (or dismissal) are filed** |
 
 **Handoff** (`/handoff`, 0.7.0): every call re-reads the whole conversation, so a long one costs
 the most (measured: late calls ~10× early ones).
 - When the reminder hook reports context past the threshold (500k tokens by default since 0.7.1,
-  `REDCELL_HANDOFF_TOKENS`), or an objective closes, the Tech Lead hands off at the next checkpoint.
-- It brings the board and memory current, writes `.redcell/handoff.md`, and shows it in chat.
+  `HARTEBURN_HANDOFF_TOKENS`), or an objective closes, the Tech Lead hands off at the next checkpoint.
+- It brings the board and memory current, writes `.harteburn/handoff.md`, and shows it in chat.
 - The owner types **`/clear`, then `go`**, in the same window; the session hook loads the handoff
   once. A new window and `go` works the same. The old conversation stays reachable with `/resume`
   (jg, 2026-10-30, reopening 2026-10-15: they answer from a phone and cannot open a new session there).
@@ -147,7 +147,9 @@ not sufficient.
 - the Architect says **conforms**, or the architecture page was updated in the same change
 - the brief is current, and the pages gate passes: code on the repo's page map changed with one of its pages, or the commit that changed it says `Pages-unchanged: <why>`
 - for a screen a vendor or a vendor's customer sees, Product named its help topics, and they are true
-- a piece whose diff changes a security-domain path (the house rules' table) has a `harteburn:security` verdict that covers it, **holds**, or the owner's own `accept piece <n>: <the finding>`, sent alone in one message. Commit first, then dispatch Security with exactly the prompt `node <plugin>/scripts/board-security.mjs --prompt <the piece's start> HEAD` prints (the board's refusal names the start); the board reads the verdict from the run's transcript and refuses Done without it, and a narrowed prompt does not count
+- a piece whose diff changes a security-domain path (the house rules' table) has a `harteburn:security` verdict that covers it, **holds**, or the owner's own `accept piece <n>: <the finding>`, sent alone in one message. Commit first, then dispatch Security with exactly the prompt the command in the board's refusal prints (`node <plugin>/scripts/board-security.mjs --prompt <the piece's start> HEAD`, with the record and piece when there are open refusals): copy it as printed. The board reads the verdict from the run's transcript and refuses Done without it, and a narrowed prompt does not count
+- each find tagged `regression of this diff? y/n`; a `y` or a `mistake` was fixed in its piece, never dropped
+- on a Team license: a Done-line or scope change has the product owner's `go piece n:`, an architecture-doc change the architecture owner's, and a risk accept is the security owner's (only theirs counts, on the board and at the push gate); see [Team seats](roles.md#team-seats)
 - the owner was asked before the full gate
 
 **A PRD is done when:**
@@ -188,5 +190,8 @@ Be honest about which is which:
 | The Prover's prompt holds only the walkthrough and the diff (`/prove`'s script) | The order of operations |
 | Every dispatch is recorded (ledger) | The checklist format |
 | A done piece that changed a security-domain path has a Security verdict covering it (the board) | |
+| An agent's push has a covering Security holds and Prover proven (the push gate, 0.26.0) | |
+| A regression of this diff cannot be dropped or blocked (the board) | |
+| On a Team license, the right seat signs off: the product owner's go for a Done-line or scope change, the architecture owner's for an architecture change, the security owner's accept (the board, and the push gate for the accept) | |
 
-If guidance proves insufficient, for example a slice marked done without the Prover, the next step is a hook that refuses a commit without a Prover verdict newer than the diff. It is not built; it waits for evidence that it's needed.
+The push gate is that next step. On 2026-10-31 a session in another repo pushed this one before its Prover and Security verdicts, so an agent's push now needs both, covering what it pushes. Git's own pre-push hook checks the same, in the owner's terminal too; the owner's way past is a self-typed `git push --no-verify`. Once a repo is held it stays held; to let one go, see [Turn it off or remove it](install.md#turn-it-off-or-remove-it). A commit is still not refused: the push is where the work leaves the machine.

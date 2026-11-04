@@ -12,7 +12,7 @@ Four things, each provided by Claude Code itself:
 |---|---|---|
 | **Hooks** | The way of working and the repo's architecture brief are put into every session and every agent automatically, every time | Claude Code plugin hooks |
 | **Independent agents** | The Prover, Architect and Product reviewer (and the Designer, on anything a person sees) run as separate agents that never see each other's work or the builder's summary, in parallel | Claude Code subagents |
-| **Commands** | `/prd-panel`, `/prove`, `/brief` run the workflows the same way every time | Claude Code plugin skills |
+| **Commands** | `/frame`, `/prd-panel`, `/prove`, `/done`, `/retro`, `/handoff`, `/brief` run the workflows the same way every time | Claude Code plugin skills |
 | **The repo itself** | The Prover runs tests and reads the diff; the gate refuses a push with a stale brief | A local checkout and a terminal |
 
 ## Where each mechanism works
@@ -42,13 +42,18 @@ Four things, each provided by Claude Code itself:
 - **The gate still works**, because it's a script in the repo. A stale brief still blocks the push, whatever tool wrote the change.
 - **The ledger is gone.** Nothing records which roles actually ran.
 - **The brief is still per repo, and compiled best by Claude Code.** Other tools read the compiled brief. The exported `harteburn-brief-compiler` can recompile it in a tool with subagents (not yet tried). With no AI at all, `node scripts/brief-stamp.mjs --no-rule-change` re-stamps when no rule changed.
+- **Known issue: the exported `/prove` does not run.** The export copies `scripts/harteburn/prove-prompt.mjs` and `walkthrough.mjs`, but `prove-prompt.mjs` also imports `board-security.mjs` and `paths.mjs`, which it does not copy, so Node stops before writing a brief. Until that is fixed, run `node <harteburn>/scripts/prove-prompt.mjs` from a HarteBurn checkout.
 - **Exported files go stale with the brief.** `node <harteburn>/scripts/export.mjs tools --check` names them; wire it next to the brief gate.
 
 ## Known limits of the full HarteBurn
 
-- **The ethos and the convene rule are guidance.** Hooks put them in front of every session, but a session can still skip a role. The checklist's first line and the ledger make a skip visible; nothing yet refuses a commit without the Prover.
-- **The brief's limit is 29,000 characters** (19,400 in two parts until 2026-10-19), sent as up to three parts, because Claude Code cuts any one hook string at 10,000.
+- **The ethos and the convene rule are guidance.** Hooks put them in front of every session, but a session can still skip a role. The checklist's first line and the ledger make a skip visible. An agent's push is refused without a covering Prover proven and Security holds (the push gate), where the repo has a security-domain table. Git's own pre-push hook checks the same in your terminal too, however the push was typed. A commit is not refused. Your way past the check is `git push --no-verify`, typed by you; an agent's is refused. Still open, for rc-security piece 8 (the sandbox): an agent that hides `--no-verify` inside a script the Bash gate cannot read skips both checks, and so do tools whose own code pushes without git's hooks (`npx lerna publish`, `nx release`, `jj git push`, libgit2 apps). A `package.json` script that pushes, run through npm, pnpm, yarn or bun, is read and refused like a script file. In a held repo an agent cannot run any script, interpreter file or package script whose text pushes: the gate cannot tell where it lands, so it refuses. A script that names a file whose text pushes (a README, say) is refused the same way, even if it only reads it ([The push gate](reference.md#the-push-gate)).
+- **A broken held repo limits every session.** While a held repo's check cannot be kept (hooks moved, its folder gone, or git that cannot run), sessions in other repos may run only file readers typed by their full path (`/bin/ls`, `/bin/cat`, `/usr/bin/grep`).
+- **The push gate needs `/usr/bin/git` and a remote that answers without a prompt.** On a Mac without the developer tools, a held repo allows only file readers until you run `xcode-select --install`. Each git call has 15 s and the check 45 s; a Keychain prompt left unanswered, or a slow remote, refuses the push ([install](install.md#the-first-gated-push-on-a-mac)).
+- **Team seats are not active yet.** Until the production signing key ships, no seat verifies: on a Team license the board refuses every Done-line, scope or architecture-doc change and every risk accept, and an accept cannot clear a "does not hold" at the push gate ([Team seats](roles.md#team-seats)).
+- **The brief's limit is 38,000 characters** (29,000 in three parts until 2026-10-30; 19,400 in two until 2026-10-19), sent as up to four parts, because Claude Code cuts any one hook string at 10,000.
 - **At the full limit, the exported `AGENTS.md` passes Codex's default 32 KiB read cap** (connector-cloud's is 23.5 KB at a 19,400-character brief). Raise Codex's `project_doc_max_bytes` (unverified) or keep the brief under about 26,000 characters for Codex.
+- **Ready's live write to a new provider is checked after it happens.** The board refuses a write row whose account the owner did not name (`test account <provider>: <account>`, sent alone), but it cannot stop the call itself: until a sandbox does (rc-security piece 8), what keeps the write off a real account is the instruction to ask first.
 - **A newly installed or updated plugin loads only in new sessions.** Restart, or run `/reload-plugins`.
 - **An install is a copy pinned to a commit.** A change to this repo reaches you only after `claude plugin update harteburn@ngentix`.
 - **The roles have no memory between sessions**, because Claude Code would keep it as untracked files inside each repo.

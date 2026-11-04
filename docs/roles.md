@@ -44,7 +44,7 @@ There is no Engineer agent. The owner decided on 2026-10-14 that the Tech Lead b
 
 **Reads:** the PRD's acceptance walkthrough, the diff, and the running page. **Never:** the builder's own account of what they did or whether it works. If anything it receives reads like one, it says so first and ignores it.
 
-**How the "never" is enforced:** the Prover's prompt is assembled by a script, `scripts/prove-prompt.mjs`, from the walkthrough and `git diff`, not written by the Tech Lead. The Tech Lead's whole dispatch is "Read <file> and follow it." A summary sitting in the repo reaches the Prover only if it is part of the change, and then the charter tells it to flag it. Both cases are tested.
+**How the "never" is enforced:** the Prover's prompt is assembled by a script, `scripts/prove-prompt.mjs`, from the walkthrough and `git diff`, not written by the Tech Lead. Before a build the Tech Lead's whole dispatch is "Read <file> and follow it."; after a build it is the whole text of `<file>.prompt`, which the script writes beside the brief, and a Prover run dispatched any other way never counts for a push. A summary sitting in the repo reaches the Prover only if it is part of the change, and then the charter tells it to flag it. Both cases are tested.
 
 **Modes** (the charter, [`agents/prover.md`](../agents/prover.md), is the source: Mode 0 at Slices, Mode 1 before the build, Mode 2 the verdict, Mode 3 on a PRD panel, and the re-pass). In brief:
 
@@ -52,7 +52,7 @@ There is no Engineer agent. The owner decided on 2026-10-14 that the Tech Lead b
 2. **After the build, the verdict.**
    - It runs the tests; every one must pass.
    - It reads the builder's own mutation results (in its brief) and re-runs one only when it looks wrong. It removes the guards the builder did not, sees each test go red, and restores the guard. A test that stays green with its guard gone proves nothing.
-   - It builds and mutates only in its own warm worktree (`<git dir>/redcell/prover-wt`), never in the working tree, so a pass takes 8 minutes or less (2026-10-18: a cold copy per pass averaged 13.1 minutes and filled the disk).
+   - It builds and mutates only in its own warm worktree (`<git dir>/harteburn/prover-wt`), never in the working tree, so a pass takes 8 minutes or less (2026-10-18: a cold copy per pass averaged 13.1 minutes and filled the disk).
    - On a walkthrough of 4 or more steps it works as a swarm of 2–3: one member builds, the others only read their steps. The change is proven only when every member says so.
    - It looks at the page for anything a person sees.
    - It checks exact shapes, such as "exactly once", not "at least", and the negative case.
@@ -150,13 +150,42 @@ There is no Engineer agent. The owner decided on 2026-10-14 that the Tech Lead b
 
 ---
 
+## Team seats
+
+On a Team license, each person has one seat. Cloud, Enterprise and no license have no seat checks. A go is the whole message, one line: `go piece n:`
+
+**Not active yet.** Until the production signing key ships, no seat verifies: on a Team license the board refuses every Done-line, scope or architecture-doc change and every risk accept, and an accept cannot clear a "does not hold" at the push gate.
+
+| Seat | What they can do |
+|---|---|
+| Product owner | Type `go piece n:` for a Done-line change or a scope change. Add a member and remove one. |
+| Architecture owner | Type `go piece n:` when `docs/architecture/` changed. |
+| Security owner | Accept a risk: `accept piece <n>: <the finding>`, alone in one message. No other seat's accept counts, on the board or at the push gate. |
+| Builder | Sign off its own piece. The board shows "signed off by its builder". That line does not clear the other seats. |
+| Reader | Read the board. A write is refused. |
+| Admin | Add a member and remove one, the same as the product owner. |
+
+The board's refusals, word for word:
+- "Piece n: a Done-line change needs the product owner to type "go piece n:" (docs/roles.md#team-seats)"
+- "Piece n: a scope change needs the product owner to type "go piece n:" (docs/roles.md#team-seats)"
+- "Piece n: an architecture-doc change needs the architecture owner to type "go piece n:" (docs/roles.md#team-seats)"
+- "Piece n: a risk accept needs the security owner (docs/roles.md#team-seats)"
+
+The org on a new member is the caller's. Naming another org is refused. Members are added with `POST /v1/team/members` (body `{"person": "<email>", "role": "<seat>"}`; the reply carries their seat key) and removed with `DELETE /v1/team/members` (body `{"person": "<email>"}`), by the product owner or admin. A removed member cannot write, including while offline grace would still pass. One key may be used on 3 devices within 60 minutes. The owner confirmed that limit on 2026-10-30. A fourth device is refused: "this key is on too many devices (docs/roles.md#team-seats)". A request that names no device is refused: "update HarteBurn: this version sends no device id (docs/roles.md#team-seats)".
+
+**Keys.** Every purchase gives two. The **seat key** is what every developer logs in with (`login.mjs --key`); a member's seat key is their own. The **owner key** stays with whoever runs the account and is refused at login ("that is the owner key: log in with the seat key"). It rotates a leaked seat key (`POST /v1/license/rotate`; on a Team with members the body names the person, `{"person": "<email>"}`), rotates itself (the same call with body `{"key": "owner"}`; the old owner key stops at once), and changes org rules (`PUT /v1/org-rules`).
+
+A seat counts only when the key built into HarteBurn verifies it. A key or license folder named in the environment is never used.
+
+Every refusal names this page.
+
 ## Brief compiler — `harteburn:brief-compiler`
 
 **Defends:** that the whole architecture is in every request, in the fewest tokens that still carry every rule. It holds no opinions about the architecture.
 
 **Reads:** the repo's architecture pages and house rules.
 
-**Writes:** `docs/architecture/BRIEF.md` (up to 29,000 characters, every rule a standalone sentence) and `docs/architecture/BRIEF-coverage.md`, which accounts for every rule line in the sources.
+**Writes:** `docs/architecture/BRIEF.md` (up to 38,000 characters, every rule a standalone sentence) and `docs/architecture/BRIEF-coverage.md`, which accounts for every rule line in the sources.
 
 **Never:** drops a real rule for space, edits a source page, or commits.
 

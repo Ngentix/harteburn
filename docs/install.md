@@ -8,6 +8,8 @@ Installing it costs nothing. A "marketplace" is only a catalogue file. This repo
 
 The release repository, `Ngentix/harteburn`, is public. No GitHub login is required.
 
+On a Mac, install the developer tools first: `xcode-select --install`. The push gate runs only the system's `/usr/bin/git`; without it, once a repo is held (its check installed), every session, in any repo, may run only file readers typed by their full path until you run `xcode-select --install`.
+
 ## One machine, every surface
 
 On one computer, **the terminal, the desktop app's local Code sessions, VS Code and JetBrains share the same settings**. Install HarteBurn at user scope on any one of them and it applies to all of them, in every repo.
@@ -91,9 +93,9 @@ plugins: [{ type: "local", path: "/Users/you/ngentix/harteburn" }]
 
 An installed copy also works: `~/.claude/plugins/cache/ngentix/harteburn/<version>`.
 
-## Organization-wide (Team and Enterprise)
+## Claude Team/Enterprise managed settings
 
-An Owner can put HarteBurn on every member's machine through **managed settings**: Organization settings → Claude Code → Managed settings, MDM, or a `managed-settings.json` file:
+This is Claude's own Team or Enterprise plan, not the HarteBurn Team license (below). An Owner can put HarteBurn on every member's machine through **managed settings**: Organization settings → Claude Code → Managed settings, MDM, or a `managed-settings.json` file:
 
 ```json
 {
@@ -105,6 +107,26 @@ An Owner can put HarteBurn on every member's machine through **managed settings*
 ```
 
 Claude Code registers the marketplace and installs the plugin at the start of each member's next session. Each member still needs read access to the repo. This is also the only documented route into cloud sessions.
+
+## HarteBurn license (Cloud, Team, Enterprise)
+
+The plugin needs no license. A Cloud or Team subscription adds the hosted board and, on Team, seats ([Team seats](roles.md#team-seats)). Team seats are not active yet. Log in once per machine with the **seat key**, never the owner key:
+
+```
+node <plugin>/scripts/login.mjs --key sy_… [--url https://…]
+```
+
+`--url` is the service's address (default `https://harteburn.ngentix.ai`; https only; plain http only to localhost, 127.0.0.1 or [::1]). Then, inside each repo whose board and ledger should sync, once:
+
+```
+node <plugin>/scripts/login.mjs --sync-here
+```
+
+A refusal prints the service's reason: "that is the owner key: log in with the seat key", "this key is on too many devices (docs/roles.md#team-seats)" (3 devices per key in 60 minutes) or "update HarteBurn: this version sends no device id (docs/roles.md#team-seats)".
+
+## The first gated push on a Mac
+
+In a repo with a security-domain table, the push gate asks the remote with `/usr/bin/git`, with no prompt allowed. The first time, macOS may show a Keychain prompt for `git-credential-osxkeychain`. Choose **Always Allow**, then push again. An unanswered prompt times out and the push is refused ("Push gate: could not check …").
 
 ## Offer it from a repo
 
@@ -121,6 +143,10 @@ claude plugin update harteburn@ngentix
 
 Then restart, or run `/reload-plugins`. To turn on auto-update for this marketplace: `/plugin` → Marketplaces → Enable auto-update.
 
+**After updating to 0.26.0**, run `/prove after` once before your next push: a Prover verdict from an earlier version does not count for a push.
+
+**Hooks from another folder** (a global or committed `core.hooksPath`, husky): HarteBurn writes no pre-push hook there. The session prints the shim to add, ending `exec node "<plugin>/hooks/harteburn-hook.mjs" pre-push "$0" "$@"`. It names this version's folder, so redo it after each update.
+
 **Added from a folder** (`claude plugin marketplace add ~/ngentix/harteburn`), sessions load HarteBurn from that folder: a new session gets whatever the checkout holds, and no `plugin update` is needed. The cache entry in `installed_plugins.json` may show an older version; it is not what loads. Proven 2026-10-27: the 0.16.0 cache had no `designer.md`, and new sessions in connector-cloud and a project-website dispatched `harteburn:designer` from the 0.20.0 folder.
 
 **Headless runs** (`claude -p`) in a repo you have never opened interactively ignore that repo's `.claude/settings.json` allow list until you accept its trust dialog once. HarteBurn still loads; only the repo's own allowed commands prompt or fail.
@@ -133,6 +159,14 @@ claude plugin enable harteburn@ngentix
 claude plugin uninstall harteburn@ngentix
 claude plugin marketplace remove ngentix
 ```
+
+Disabling stops the sessions' hooks, not git's: in a repo with a security-domain table, the terminal check still runs on every push.
+
+In a repo with a security-domain table, HarteBurn also put git's `pre-push` hook in `.git/hooks`. After uninstalling, it refuses every push with:
+
+> HarteBurn's pre-push check could not find HarteBurn (named in <git dir>/harteburn/plugin-root), so this push is refused. To push without the check, type in your own terminal: git push --no-verify; to remove the check: rm <git dir>/hooks/pre-push
+
+(or `mv <git dir>/hooks/pre-push.local <git dir>/hooks/pre-push`, when the repo had its own hook). Run that command, then `rm .git/harteburn/plugin-root`, and delete the repo's line from `~/.claude/harteburn/held-repos` (`$CLAUDE_CONFIG_DIR/harteburn/held-repos` when that is set). The hook runs HarteBurn from the folder the last session in that repo used (`.git/harteburn/plugin-root`); if an update removes that folder, terminal pushes there are refused until you start a session in the repo.
 
 ## Check it works
 

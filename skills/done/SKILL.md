@@ -17,7 +17,7 @@ Run the Done review. **Timebox: 10 min.**
 
    Read-only. Put it in one evidence file (`docs/reviews/<id>-<date>-done-evidence.md`), facts only,
    with no conclusions. **Start it from the skeleton and check it before dispatch**:
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/done-evidence.mjs" init .redcell/board.json <evidence file>`
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/done-evidence.mjs" init .harteburn/board.json <evidence file>`
    writes one `## D<n>` section per Done line; fill each with what production showed; `… check …`
    exits 1 naming every outcome line still empty, and the review is not dispatched until it passes.
 2. Dispatch `harteburn:product` with only this:

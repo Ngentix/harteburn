@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// The board in the IDE: renders the current objective's record (.redcell/board.json, the same
-// record the claude.ai board page shows) as .redcell/board.md, which VS Code keeps open as a live
+// The board in the IDE: renders the current objective's record (.harteburn/board.json, the same
+// record the claude.ai board page shows) as .harteburn/board.md, which VS Code keeps open as a live
 // Markdown preview (the session hook opens it; workspace setting maps it to the preview editor).
 //
-//   node scripts/board-md.mjs [<repo root>]     reads <root>/.redcell/board.json, writes board.md
+//   node scripts/board-md.mjs [<repo root>]     reads <root>/.harteburn/board.json, writes board.md
 //
 // The board is the Done checklist (jg 2026-10-19: "open items on top; the frame is the checklist
 // that defines Done, not a log of work done"). On every run, finished work items (done, dropped)
-// leave board.json for an append-only log, <git dir>/redcell/log-<id>.jsonl, one JSON object per
+// leave board.json for an append-only log, <git dir>/harteburn/log-<id>.jsonl, one JSON object per
 // line, read by /retro. Each item is logged once (by its id). Earlier spellings are rewritten in
 // place (scripts/board-schema.mjs), and anything the schema doesn't know is named at the top.
 //
@@ -22,8 +22,11 @@ import { join, isAbsolute, relative, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { BEATS, STATE_WORD, OPEN, FINISHED, normalize, doneOrder, beatMinutes, currentTimebox, assignIds, slugOf, refusals, runsFromLedger, applyStamps, heldToRules } from "./board-schema.mjs";
-import { securityCheck, sessionFiles, headOf, SAFE } from "./board-security.mjs";
+import { BEATS, STATE_WORD, OPEN, FINISHED, normalize, doneOrder, beatMinutes, currentTimebox, assignIds, slugOf, refusals, runsFromLedger, applyStamps, heldToRules, LIVE_RULES_FROM, deferredRegression, triageRefusals } from "./board-schema.mjs";
+import { securityCheck, sessionFiles, headOf, SAFE, namedAccounts, isSecurity } from "./board-security.mjs";
+import { seatGate } from "./seat-gate.mjs";
+import { homeFlag } from "./login.mjs";
+import { boardDir, stateDir } from "./paths.mjs";
 
 const MARK = { done: "[x]", dropped: "[~]", doing: "[ ]", todo: "[ ]", blocked: "[!]" };
 const BEAT_WORD = { done: "Done", todo: "To do", here: "Here", blocked: "Blocked", dropped: "Dropped" };
@@ -62,11 +65,11 @@ const doneLine = (d) => {
 const WORK_MARK = { done: "✅", doing: "▶", blocked: "⛔", todo: "⬜", dropped: "~~" };
 
 /** A numbered piece: "3. text — check · used of timebox min · price N min", plus its go when added. */
-const pieceLine = (p, frozen, now, security) => {
+const pieceLine = (p, frozen, now, security, signoff) => {
   const used = beatMinutes(p, now);
   const over = p.timebox && used > 2 * p.timebox ? " ⚠ over 2×" : p.timebox && used > p.timebox ? " over" : "";
   const added = typeof frozen === "number" && p.n > frozen ? ` · added after Slices: ${p.go || "⚠ no go"}` : "";
-  const call = p.owner_call ? ` · owner: ${p.owner_call}` : "";
+  const call = (p.owner_call ? ` · owner: ${p.owner_call}` : "") + (p.holds_back ? ` · holds back ${p.holds_back}` : "");
   // Design and screens on their own line, one screen per line: a reason with commas stays readable
   // and the piece's own line stays short (RC-DESIGNER consult, 2026-10-27).
   const link = String(p.mockup || "").replace(/(https?:\/\/\S+?)([.,;:)]*)(?=\s|$)/, "[mockup]($1)$2");
@@ -74,7 +77,8 @@ const pieceLine = (p, frozen, now, security) => {
   const screens = Array.isArray(p.screens) ? p.screens.map((s) => `  - ${s?.name || "?"}: ${String(s?.fidelity || "").replace(/^does not ship/i, "**does not ship**") || "**⚠ no fidelity yet**"}`) : [];
   const note = p.note ? ` — _${p.note}_` : "";
   const sec = security ? [`  - ${security}`] : [];
-  return [`- ${MARK[p.state] || "[ ]"} ${p.n}. ${p.state === "dropped" ? `~~${p.text}~~` : p.text}${p.state === "doing" ? " ← here" : ""} — check: ${p.check || "⚠ none"} · ${used} of ${p.timebox ?? "?"} min${over} · price ${p.price ?? "?"} min${added}${call}${note}`, ...design, ...screens, ...sec].join("\n");
+  const signed = signoff ? [`  - ${signoff}`] : [];
+  return [`- ${MARK[p.state] || "[ ]"} ${p.n}. ${p.state === "dropped" ? `~~${p.text}~~` : p.text}${p.state === "doing" ? " ← here" : ""} — check: ${p.check || "⚠ none"} · ${used} of ${p.timebox ?? "?"} min${over} · price ${p.price ?? "?"} min${added}${call}${note}`, ...design, ...screens, ...sec, ...signed].join("\n");
 };
 
 /**
@@ -141,7 +145,7 @@ export function boardMarkdown(o, now = Date.now(), extra = {}) {
     const done = pieces.filter((p) => p.state === "done").length;
     const dropped = pieces.filter((p) => p.state === "dropped").length;
     const counts = [`${done} done`, dropped ? `${dropped} dropped` : ""].filter(Boolean).join(", ");
-    out.push(`## Pieces — ${cur ? `piece ${cur.n} of ${pieces.length} (${counts})` : `${done} of ${pieces.length} done${dropped ? ` (${dropped} dropped)` : ""}`}`, ...pieces.map((p) => pieceLine(p, o.pieces_at_slices, now, extra.security?.[p.n])), "");
+    out.push(`## Pieces — ${cur ? `piece ${cur.n} of ${pieces.length} (${counts})` : `${done} of ${pieces.length} done${dropped ? ` (${dropped} dropped)` : ""}`}`, ...pieces.map((p) => pieceLine(p, o.pieces_at_slices, now, extra.security?.[p.n], extra.signoff?.[p.n])), "");
   }
 
   if (o.yours?.length) out.push("## Yours", ...o.yours.map((y) => `- **${y}**`), "");
@@ -159,7 +163,8 @@ export function boardMarkdown(o, now = Date.now(), extra = {}) {
   }
   out.push("");
 
-  const open = (o.items || []).filter((i) => !FINISHED.includes(i.state));
+  // A dropped regression of our own diff stays on the record (settle keeps it): it is still open work.
+  const open = (o.items || []).filter((i) => !FINISHED.includes(i.state) || deferredRegression(i));
   if (open.length) {
     const label = Object.fromEntries(BEATS.map(([k, l]) => [k, l]));
     const rank = (i) => (OPEN.indexOf(i.state) + 4) % 4;
@@ -213,7 +218,7 @@ export function openRecordPointer(root, rec) {
   let dir = "";
   try {
     const g = execFileSync("git", [...SAFE, "rev-parse", "--git-dir"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    dir = join(isAbsolute(g) ? g : join(root, g), "redcell");
+    dir = stateDir(isAbsolute(g) ? g : join(root, g));
   } catch {
     return [];
   }
@@ -233,12 +238,12 @@ export function openRecordPointer(root, rec) {
   return [];
 }
 
-/** Where the log lives: the repo's git dir (never committed, like the ledger), else .redcell/. */
+/** Where the log lives: the repo's git dir (never committed, like the ledger), else .harteburn/. */
 export function logPath(root, rec) {
-  let dir = join(root, ".redcell");
+  let dir = boardDir(root);
   try {
     let g = execFileSync("git", [...SAFE, "rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    if (g) dir = join(isAbsolute(g) ? g : join(root, g), "redcell");
+    if (g) dir = stateDir(isAbsolute(g) ? g : join(root, g));
   } catch {}
   return join(dir, `log-${rec.id || slugOf(rec.title)}.jsonl`);
 }
@@ -262,7 +267,7 @@ function readLog(file) {
  * logged (the script writes board.json there), so a crash after the log never logs twice.
  * A log row keeps every key its item had, unknown ones too.
  */
-export function settle(raw, file, now = new Date(), { persist, ledger, root } = {}) {
+export function settle(raw, file, now = new Date(), { persist, ledger, root, home } = {}) {
   const { record, warnings } = normalize(raw);
   // Retro 2026-10-25 (jg ratified Change 1): a fix is never a Done line, on an open record framed
   // before that rule too (KIT-001 met /done with 11 fixed defects among its 22 lines). Each found or
@@ -291,9 +296,14 @@ export function settle(raw, file, now = new Date(), { persist, ledger, root } = 
   // Hashed once per render; past the cap, an empty baseline is stamped, so every file counts as new.
   let local;
   if (head) local = sessionFiles(root);
-  const stamped = applyStamps(record, stamps, now, { head, local: local && (local.files || {}) });
+  // When this record's Security runs were dispatched or ended: a parked piece judged while it ran keeps its start.
+  const securityRuns = (ledger || []).filter((r) => r && isSecurity(r.role) && r.board === record.id).map((r) => String(r.ts ?? ""));
+  const stamped = applyStamps(record, stamps, now, { head, local: local && (local.files || {}), securityRuns });
+  // A Team license: the right seat's typed go, before Security reads the ledger (a builder's accept
+  // must not clear a verdict). Cloud, and no license, leaves the ledger as it is.
+  const seats = seatGate(root, record, stamps, ledger, { now: now.getTime(), ...(home && { home }) });
   // A done piece that changed a security-domain path needs a Security verdict (rc-security piece 3).
-  const security = securityCheck(root, record, stamps, ledger, { local });
+  const security = securityCheck(root, record, stamps, seats.ledger, { local });
   if (JSON.stringify(stamps) !== was) {
     mkdirSync(dirname(stampsFile), { recursive: true });
     writeFileSync(stampsFile, JSON.stringify(stamps, null, 1) + "\n");
@@ -312,18 +322,25 @@ export function settle(raw, file, now = new Date(), { persist, ledger, root } = 
     if (row && !same(i, row)) { i.id = randomBytes(5).toString("hex"); renewed++; }
   }
   if (renewed && persist) persist(record);
-  const moving = (record.items || []).filter((i) => FINISHED.includes(i.state) && !logged.has(i.id));
+  // A dropped regression of our own diff stays on the record, so its refusal stands until it is put back
+  // (retro 2026-10-28, connector-cloud FEA-CC-456, Change 2): logged, it would leave unseen.
+  const kept = (i) => String(stamps?.opened_at ?? record.opened_at ?? "").slice(0, 10) >= LIVE_RULES_FROM && deferredRegression(i);
+  const moving = (record.items || []).filter((i) => FINISHED.includes(i.state) && !logged.has(i.id) && !kept(i));
   const fresh = moving.map((i) => ({ ts: before ? null : now.toISOString(), ...(before ? { migrated: true } : {}), ...i }));
   if (fresh.length) {
     mkdirSync(join(file, ".."), { recursive: true });
     appendFileSync(file, fresh.map((r) => JSON.stringify(r)).join("\n") + "\n");
   }
-  record.items = (record.items || []).filter((i) => !FINISHED.includes(i.state));
+  record.items = (record.items || []).filter((i) => !FINISHED.includes(i.state) || kept(i));
   const all = [...rows, ...fresh];
   record.log_count = all.length;
+  // Product's triage list carries the regression column, and holds no regression of our own diff.
+  const triageFile = root && join(root, "docs", "triage.md");
+  const triage = triageFile && String(stamps?.opened_at ?? record.opened_at ?? "").slice(0, 10) >= LIVE_RULES_FROM && existsSync(triageFile)
+    ? triageRefusals(readFileSync(triageFile, "utf8")) : [];
   return {
-    record, warnings: [...warnings, ...stamped, ...refusals(record, now.getTime(), { stamps, ledger }), ...security.problems],
-    notes: security.notes, security: security.shown,
+    record, warnings: [...warnings, ...stamped, ...refusals(record, now.getTime(), { stamps, ledger, accounts: root ? namedAccounts(root, record.id, ledger, { since: stamps?.opened_at ?? record.opened_at ?? "" }) : [] }), ...triage, ...seats.problems, ...security.problems],
+    notes: security.notes, security: security.shown, signoff: seats.shown,
     log: { count: all.length, found: all.filter((r) => r.kind === "found").length, mistakes: all.filter((r) => r.kind === "mistake").length },
   };
 }
@@ -342,7 +359,7 @@ function startedDirectly() {
 }
 if (process.argv[1] && startedDirectly()) {
   const root = process.argv[2] || process.cwd();
-  const src = join(root, ".redcell", "board.json");
+  const src = join(boardDir(root), "board.json");
   let md;
   let problems = [];
   try {
@@ -367,9 +384,9 @@ if (process.argv[1] && startedDirectly()) {
       } else {
         const file = logPath(root, raw); // the record's id, else its title: what assignIds will save as its id
         const ledger = readLog(join(file, "..", "ledger.jsonl"));
-        const { record, warnings, log, notes, security } = settle(raw, file, new Date(), { persist: save, ledger, root });
+        const { record, warnings, log, notes, security, signoff } = settle(raw, file, new Date(), { persist: save, ledger, root, home: homeFlag() });
         save(record);
-        md = boardMarkdown(record, Date.now(), { warnings, notes, security, log: { ...log, path: relative(root, file) || file } });
+        md = boardMarkdown(record, Date.now(), { warnings, notes, security, signoff, log: { ...log, path: relative(root, file) || file } });
         problems = warnings;
       }
     }
@@ -377,9 +394,9 @@ if (process.argv[1] && startedDirectly()) {
     problems = [`the record could not be read: ${e.message}`];
     md = `# HarteBurn board\n\n⛔ **The board refuses this record: 1 problem. Put it right first.**\n- ${problems[0]}\n`;
   }
-  writeFileSync(join(root, ".redcell", "board.md"), md);
+  writeFileSync(join(boardDir(root), "board.md"), md);
   if (problems.length) {
-    process.stderr.write(`⛔ The board refuses .redcell/board.json (${problems.length} problem${problems.length > 1 ? "s" : ""}):\n${problems.map((p) => `- ${p}\n`).join("")}`);
+    process.stderr.write(`⛔ The board refuses .harteburn/board.json (${problems.length} problem${problems.length > 1 ? "s" : ""}):\n${problems.map((p) => `- ${p}\n`).join("")}`);
     process.exitCode = 1;
   }
   // The license folder is never the environment's (a project's settings can set it); tests pass --home.

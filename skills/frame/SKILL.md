@@ -9,18 +9,18 @@ Frame through an approved PRD ≤ 30 min when the design reuses existing mechani
 
 0. **Carry the open Changes forward.** Put each Change that `node scripts/open-changes.mjs` prints,
    run in the HarteBurn plugin repo, on the new checklist as a check ("did it hold this time?"); a `PROPOSED` one goes to the owner first.
-0b. **Check that the hooks run here.** Read `<git dir>/redcell/ledger.jsonl` for a `session` row
+0b. **Check that the hooks run here.** Read `<git dir>/harteburn/ledger.jsonl` for a `session` row
    from this session (the session-start hook writes one). None: the plugin's hooks are not running
    (a cloud session, HarteBurn run from its files), so nothing records the runs and nothing stamps
    the board. Say so in chat and on the board, then after **every** Agent result run
-   `node <plugin>/hooks/redcell-hook.mjs ledger-stop --manual <role> "<purpose>" <tokens> <ms>
+   `node <plugin>/hooks/harteburn-hook.mjs ledger-stop --manual <role> "<purpose>" <tokens> <ms>
    [--model <m>]` (the numbers in the result), and run `board-md.mjs` yourself after every record
    edit, so its stamps, not typed times, set the beats. The board refuses a record opened from
    2026-10-29 whose ledger shows neither.
    **Set the objective's token budget** (`budget_tokens`, the owner's number; ask once at Frame,
    else 2,000,000): the board shows tokens used against it, and an over-budget line is the signal
    to narrow the next briefs or ask the owner.
-1. **Open the live checklist page.** If `harteburn.json` is present, `board-md.mjs` also stores the record on the hosted board. If the repo has `.redcell/board.url`, republish the plugin's
+1. **Open the live checklist page.** If `harteburn.json` is present, `board-md.mjs` also stores the record on the hosted board. If the repo has `.harteburn/board.url`, republish the plugin's
    `templates/board/board.html` to that URL (read it first, then publish with `url`). If not, create
    it once, as the plugin's `docs/reference.md` "The board, first time" says.
 
@@ -43,10 +43,10 @@ Frame through an approved PRD ≤ 30 min when the design reuses existing mechani
      reads it, and when"). `kind`: `outcome` (default) or `gate` (shown last). Each line's state
      changes as the work moves; `/done` judges each one against production and writes its `evidence`.
    - **`items` is the open work** (`todo`, `doing`, `blocked`). Mark one `done` or `dropped` and
-     the renderer moves it to the append-only log, `<git dir>/redcell/log-<id>.jsonl` (one JSON
+     the renderer moves it to the append-only log, `<git dir>/harteburn/log-<id>.jsonl` (one JSON
      object per line, never markdown), which `/retro` reads. The board shows only its count.
 
-   Write `.redcell/board.json` whole once, here. Afterwards **edit only the lines that changed**
+   Write `.harteburn/board.json` whole once, here. Afterwards **edit only the lines that changed**
    (and `updated_at`), never resend the record. A scope change
    after Frame is never a silent edit: add a `scope` entry (added / dropped / changed, what, why, who decided) **with its price**:
    what it costs the objective (delivery time, money, or what it holds back), from Product. A decision that changes a Done line edits that line
@@ -89,6 +89,7 @@ Frame through an approved PRD ≤ 30 min when the design reuses existing mechani
      read-only production read of its setting, before Build, and each new account's one record read
      with its real sign-in (the canary's, or the test account's) before any slice depends on it. A
      setting that is off is a found row, its fix an owner act on Yours.
+   - **A new provider** (the record's `providers`, set at Frame) widens Ready to 60 min: one real sign-in, list and write per Done-line resource, through the project's own local client, each reply's shape in `live_reads`, before Slices prices a piece (the board refuses Slices without them). The write goes only to a test or sandbox account the owner names, before the write, in a message of their own: `test account <provider>: <account>` (ask on Yours); never a customer's or production account.
    - **The load-bearing design**: the Architect names the one part that is (a new mechanism, a
      changed contract). Only that part goes through the full PRD panel; the rest goes to the owner
      with the Prover's derived tests.
@@ -101,7 +102,7 @@ Frame through an approved PRD ≤ 30 min when the design reuses existing mechani
    it returns as "cannot pass in this objective" is cut or reshaped with Product and the owner
    before Build. **A find while building** gets Product's triage, one of three answers: a fix inside
    the piece it blocks, a new numbered piece (the owner's go), or a row on a named objective's
-   priced list; never an automatic deferral. Each slice rides the project's **release cadence** (the
+   priced list; never an automatic deferral. Product's triage list (`docs/triage.md`) has a `regression of this diff?` column, the Prover's y or n: a y is fixed inside its piece and never goes on the list (the board refuses a y row on the list, and a y item dropped or blocked). A piece added after Slices carries `holds_back` ("<what> by ~N h") for the owner. Each slice rides the project's **release cadence** (the
    Lead's charter); with no `Release cadence:` line in its house rules, ask the owner once and add it.
    **Design**: mark each piece that changes anything a person sees `"design": "consult"` or `"full"`
    (the Designer's "Two depths"). A full pass: `harteburn:designer` makes mockups (30 min), the Tech

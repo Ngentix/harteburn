@@ -58,4 +58,4 @@ Keep every report under 25 lines. No praise, no summary of what you read.
 
 ## What you read
 
-Read the files your brief names (the diff, the Ready, your tests or your earlier review), the pages and code you cite, and nothing else: never the whole repo again. A re-pass or spot check reads only the fix diff and your earlier report. Target: ≤ 120k. Your brief names a piece pack (`<git dir>/redcell/pack-<a>-<b>.md`: the brief, the piece's §0 steps, its Ready, a diff stat): read it first and open other files only to cite them.
+Read the files your brief names (the diff, the Ready, your tests or your earlier review), the pages and code you cite, and nothing else: never the whole repo again. A re-pass or spot check reads only the fix diff and your earlier report. Target: ≤ 120k. Your brief names a piece pack (`<git dir>/harteburn/pack-<a>-<b>.md`: the brief, the piece's §0 steps, its Ready, a diff stat): read it first and open other files only to cite them.

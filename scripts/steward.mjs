@@ -23,10 +23,11 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { classify } from "./retention.mjs";
+import { env, homeDir, stateDir } from "./paths.mjs";
 
 const DAY = 24 * 3600e3;
 /** A number from the environment, or NaN when unset or empty (an empty setting is not 0). */
-const envNum = (name) => (process.env[name] ? Number(process.env[name]) : NaN);
+const envNum = (name) => (env(name) ? Number(env(name)) : NaN);
 const SELF = fileURLToPath(import.meta.url);
 // Another repo's config never runs code here (security review of 0.22.5): no fsmonitor, no hooks.
 const SAFE = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"];
@@ -76,9 +77,9 @@ function unsaved(wt, detached) {
 
 /** The oldest open record's time across the common dir and every worktree's git dir, or null. */
 function oldestOpen(common) {
-  const files = [join(common, "redcell", "open-record.json")];
+  const files = [join(stateDir(common), "open-record.json")];
   const wd = join(common, "worktrees");
-  if (existsSync(wd)) for (const n of readdirSync(wd)) files.push(join(wd, n, "redcell", "open-record.json"));
+  if (existsSync(wd)) for (const n of readdirSync(wd)) files.push(join(stateDir(join(wd, n)), "open-record.json"));
   const ats = files.flatMap((f) => {
     try { return [Date.parse(JSON.parse(readFileSync(f, "utf8")).at)]; } catch { return []; }
   }).filter(Number.isFinite);
@@ -104,7 +105,7 @@ function buildState(root, { touched = false } = {}) {
   if (!existsSync(join(top, "Cargo.toml")) || repoScript(root)) return none;
   const target = join(top, "target");
   try { if (!lstatSync(target).isDirectory()) return none; } catch { return none; }
-  const below = envNum("REDCELL_SWEEP_BELOW_GB");
+  const below = envNum("SWEEP_BELOW_GB");
   if (!(freeGb(root) < (Number.isFinite(below) ? below : SWEEP_BELOW_GB))) return none;
   if (!sweepInstalled()) return { due: true, installed: false };
   return { due: true, installed: true, top, bytes: measure(target).bytes };
@@ -116,7 +117,7 @@ export function proposals(root, { now = Date.now(), since = null, touched = fals
   const g = tryGit(root, "rev-parse", "--git-common-dir");
   if (!g) return { items, listed };
   const common = real(isAbsolute(g) ? g : resolve(root, g));
-  const rc = join(common, "redcell");
+  const rc = stateDir(common);
   if (!existsSync(rc)) return { items, listed };
   // `since`: the start of another repo's objective that changed this one; the older cutoff wins.
   const own = oldestOpen(common) ?? now - DAY;
@@ -172,14 +173,14 @@ export function stamp(root, { withScript = false, freeBefore = null, trimmed = f
   try {
     const g = tryGit(root, "rev-parse", "--git-common-dir");
     if (!g) return null;
-    const rc = join(real(isAbsolute(g) ? g : resolve(root, g)), "redcell");
+    const rc = stateDir(real(isAbsolute(g) ? g : resolve(root, g)));
     const script = repoScript(root);
     if (withScript && script && !touched) {
       freeBefore = freeBytes(root);
       trimmed = true;
       try { execFileSync(script, ["--steward"], { cwd: dirname(dirname(script)), stdio: "ignore", timeout: 120000, killSignal: "SIGKILL" }); } catch {}
     }
-    const belowEnv = envNum("REDCELL_SWEEP_BELOW_GB");
+    const belowEnv = envNum("SWEEP_BELOW_GB");
     const attempted = !!trimmed && freeBefore != null && freeBefore / 1e9 < (Number.isFinite(belowEnv) ? belowEnv : SWEEP_BELOW_GB);
     const always = alwaysKinds(rc);
     const everywhere = kindsIn(everywhereFile());
@@ -223,10 +224,10 @@ export function stamp(root, { withScript = false, freeBefore = null, trimmed = f
 export const ASK_KINDS = ["scratch", "dir", "worktree", "build"];
 const rcOf = (root) => {
   const g = tryGit(root, "rev-parse", "--git-common-dir");
-  return g ? join(real(isAbsolute(g) ? g : resolve(root, g)), "redcell") : "";
+  return g ? stateDir(real(isAbsolute(g) ? g : resolve(root, g))) : "";
 };
-/** The every-repo answers file: $REDCELL_HOME, else ~/.claude/redcell. */
-export const everywhereFile = () => join(process.env.REDCELL_HOME || join(homedir(), ".claude", "redcell"), "steward-always.json");
+/** The every-repo answers file: $HARTEBURN_HOME, else ~/.claude/harteburn. */
+export const everywhereFile = () => join(homeDir(), "steward-always.json");
 const readJson = (f, dflt) => { try { return JSON.parse(readFileSync(f, "utf8")) ?? dflt; } catch { return dflt; } };
 const kindsIn = (f) => { const k = readJson(f, {})?.kinds; return Array.isArray(k) ? k.filter((x) => ASK_KINDS.includes(x)) : []; };
 const writeKinds = (f, kinds) => { mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, JSON.stringify({ kinds: [...new Set(kinds)].sort() }) + "\n"); };
@@ -241,7 +242,7 @@ function removeKind(root, rc, kind, { touched = false, since = null, now = Date.
     if (i.kind !== kind) continue;
     if (kind === "build") {
       const top = real(tryGit(root, "rev-parse", "--show-toplevel") || "");
-      const cap = envNum("REDCELL_TRIM_CAP_GB") || TRIM_CAP_GB;
+      const cap = envNum("TRIM_CAP_GB") || TRIM_CAP_GB;
       try {
         execFileSync("cargo", ["sweep", "--maxsize", `${cap}GB`, top], { cwd: top, stdio: "ignore", timeout: 600000 });
         freed += Math.max(0, i.bytes - measure(join(top, "target")).bytes);
@@ -323,7 +324,7 @@ export function reminderLines(root) {
   const top = tryGit(root, "rev-parse", "--show-toplevel") || root;
   if (asked.length) out.push(`Steward: ${asked.join("; ")} are past their objective. Ask the owner about each: yes, no, always here (this repo), or always in every repo (then: node "${SELF}" "${top}" --answer <kind> <yes|no|always-here|always-everywhere>).`);
   const last = readJson(join(rc, "steward.last"), {}) || {};
-  const below = envNum("REDCELL_SWEEP_BELOW_GB");
+  const below = envNum("SWEEP_BELOW_GB");
   if (last.trim_skipped === "cargo-sweep not installed") out.push(`Steward: free space is under ${Number.isFinite(below) ? below : SWEEP_BELOW_GB} GB and this repo's build output could be trimmed, but cargo-sweep is not installed; to let it: cargo install cargo-sweep.`);
   const ran = last.always || {};
   const done = Object.keys(ran).filter((k) => ran[k]?.bytes > 0);

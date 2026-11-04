@@ -4,14 +4,19 @@
 // The address is the one stored at login, never the environment.
 
 import { readFileSync } from "node:fs";
-import { readLicense, licenseHome, DEFAULT_URL } from "./login.mjs";
+import { readLicense, licenseHome, DEFAULT_URL, safeUrl, deviceId } from "./login.mjs";
 import { redactChange } from "./redact.mjs";
 
 export async function phone(kind, payload, { home, url, fetchImpl = globalThis.fetch, timeoutMs = 2500 } = {}) {
   const lic = readLicense(home || licenseHome());
   if (!lic?.key) return { sent: false, reason: "no license" };
   const base = (url || lic.url || DEFAULT_URL).replace(/\/$/, "");
-  const headers = { "content-type": "application/json", authorization: `Bearer ${lic.key}` };
+  if (!safeUrl(base)) return { sent: false, reason: "not https" };
+  const headers = {
+    "content-type": "application/json",
+    authorization: `Bearer ${lic.key}`,
+    "x-harteburn-device": deviceId(home || licenseHome()),
+  };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const signal = ctrl.signal;

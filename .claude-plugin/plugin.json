@@ -1,11 +1,11 @@
 {
   "name": "harteburn",
-  "version": "0.24.2",
+  "version": "0.26.0",
   "description": "Ngentix HarteBurn: independent role agents (prover, architect, product, designer, security, architecture lead) and a token-minimized architecture brief present in every conversation, for every PRD, build and decision.",
   "author": {
     "name": "Ngentix",
     "email": "jeremy@ngentix.ai"
   },
-  "repository": "https://github.com/Ngentix/redcell",
+  "repository": "https://github.com/Ngentix/harteburn",
   "license": "LicenseRef-HarteBurn"
 }
