@@ -113,7 +113,13 @@ function config(root) {
   } catch (e) {
     return { error: `publish.config.json does not parse (${e.message}): fix it and commit` };
   }
-  const deny = (Array.isArray(c.deny) ? c.deny : []).map(String).map((t) => t.trim()).filter(Boolean);
+  // Only an object whose deny is a list of strings counts: null crashed here, and a number or object in the list
+  // became a term like "42" or "[object Object]" that names no customer, so the check ran on nothing (hb-seats-1 piece 1).
+  if (!c || typeof c !== "object" || Array.isArray(c)) return { error: "publish.config.json is not a JSON object: write {\"deny\": [<the customer names>]} and commit" };
+  if (Array.isArray(c.deny) && c.deny.some((t) => typeof t !== "string")) return { error: "publish.config.json lists a deny term that is not a string: every term must be a customer name in quotes" };
+  // A term names a customer only if it holds a letter or a digit: trim() keeps U+200B, so ["​"] looked like a
+  // list and checked nothing (Prover on 77b1937).
+  const deny = (Array.isArray(c.deny) ? c.deny : []).map((t) => t.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim()).filter((t) => /[\p{L}\p{N}]/u.test(t));
   if (!deny.length) return { error: "publish.config.json has no deny terms: list the customer names no public file may hold" };
   return { deny, allow: (Array.isArray(c.allow) ? c.allow : []).map(String).filter(Boolean) };
 }

@@ -76,8 +76,9 @@ export function pushesIn(command, cwd) {
   // An unknown command that names another folder or runs code from text can act on any repo: it holds
   // everywhere, never only where the session's folder is held (automated review of b6ca3b9).
   const elsewhere = /(^|\s)(-C|--git-dir|--work-tree|--chdir|pushd)\b|chdir|(^|[\s;&|('"])cd\s|\s-[ce]\s|\s\/[\w.-]/.test(plain);
-  // A here-doc or here-string hands a shell its command as text (Security on e13b1ba).
-  if (/<<|[<>]\(/.test(plain) && /\b(push|git)\b/.test(plain)) return [{ unknown: true, dir: null }];
+  // A here-doc or here-string hands a shell its command as text (Security on e13b1ba). One alone, with a quoted
+  // delimiter and only written to a file outside .git, runs nothing: its text is data (0.26.1, owner 2026-11-04).
+  if (/<<|[<>]\(/.test(plain) && /\b(push|git)\b/.test(plain)) return quotedHereDocToFile(String(command), cwd) ? [] : [{ unknown: true, dir: null }];
   // A command substitution can run a push the reader never sees as a word (automated review of b7bfbc6).
   if (/`|\$\(/.test(String(command)) && /\b(push|git)\b/.test(String(command))) return [{ unknown: true }];
   const toks = lex(String(command));
@@ -100,13 +101,29 @@ export function pushesIn(command, cwd) {
   // Fail closed (Security on e13b1ba): a "push" word anywhere must sit in a readable git push, or in a
   // reader (echo, grep) that pipes into nothing; else the command is one this reader cannot place.
   let loose = false;
+  // The new readers count only in a command that is one pipeline: any ;, &&, ||, &, newline or ( ) lets an earlier part
+  // make the reader a shell (a function, builtin alias, PATH=; Security on e44025b..ac3e68f, high).
+  const aliasy = ops.some((o) => o !== "|") || segs.some((s) => ["alias", "unalias", "function"].includes(s[0]?.w) || s.some((x) => /\(\)/.test(x.w)));
+  const headOf = (s) => { let k = 0; while (k < s.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(s[k].w) || WRAPPERS.includes(s[k].w))) k++; return k; };
+  // A new reader (sed, a pipe of readers) counts only typed bare, in one pipeline that defines no alias and writes no
+  // file: sed copying a pushing script into .git/hooks pushed live (Prover on b0c5896).
+  // And only when every part of the command is a bare reader, never less or rg: sed piped into tee, perl or node pushed
+  // live (Security and Prover on 6f498d1). The shape is closed: readers reading, nothing else.
+  const pure = !aliasy && !writes.some(Boolean) && segs.every((x) => x.length && headOf(x) === 0 && !["less", "rg"].includes(basename(x[0].w)) && isReader(x));
+  const newReader = (s, k) => pure && k === 0 && isReader(s);
+  // Each segment piped into is a reader typed bare (no NAME=, no env or other wrapper in front), never less, whose
+  // LESSOPEN runs a program on the piped text, nor rg, whose --pre does (Security on e44025b..d80fed8, high).
+  const pipesToReaders = (j) => { for (let m = j; ops[m] === "|"; m++) { const s = segs[m + 1] || []; if (writes[m + 1] || headOf(s) !== 0 || ["less", "rg"].includes(basename(s[0]?.w ?? "")) || !isReader(s)) return false; } return true; };
   segs.forEach((s, j) => {
     if (!s.some((x) => /\bpush\b/.test(x.w))) return;
     let k = 0;
     while (k < s.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(s[k].w) || WRAPPERS.includes(s[k].w))) k++;
     const h = basename(s[k]?.w ?? "");
     if (h === "git" || h === "cd") return;
-    if (READERS.includes(h) && ops[j] !== "|" && !writes[j]) return;
+    // A reader that pipes only into readers (grep -n S8 push-gate.mjs | head -30) is still a reader (0.26.1).
+    // The new readers (sed, a pipe of readers) count only typed bare, in a command that defines no alias; anything else
+    // reads as 0.26.0 did (Prover and Security on d80fed8 and 615cac2: PATH=bin sed, alias cat=sh).
+    if (!writes[j] && (ops[j] === "|" ? newReader(s, k) && pipesToReaders(j) : READERS.includes(h) || newReader(s, k))) return;
     loose = true;
   });
   for (const s of segs) {
@@ -163,10 +180,10 @@ export function pushesIn(command, cwd) {
       // git further on, under a program that may run it (`nice -n 5 git push`, `xargs`): fail closed.
       // Any git (or git-<command>, run directly) there fails closed, push word or not: an alias can hide
       // it (automated review of e13b1ba). Held repos only: pushGate lets an unheld folder's pass.
-      if (!READERS.includes(basename(head)) && s.slice(k).some((x) => /^git(-|$)/.test(basename(x.w)) || /(^|[\s/;&|(])git(-[\w-]+)?\s/.test(x.w.replace(/["'\\]/g, "")))) out.push({ unknown: true, dir: lost ? null : dir });
+      if (!(READERS.includes(basename(head)) || newReader(s, k)) && s.slice(k).some((x) => /^git(-|$)/.test(basename(x.w)) || /(^|[\s/;&|(])git(-[\w-]+)?\s/.test(x.w.replace(/["'\\]/g, "")))) out.push({ unknown: true, dir: lost ? null : dir });
       // A package runner further on (timeout 60 npm run x, corepack pnpm x): its scripts are not read (automated review of c85767d).
-      else if (!READERS.includes(basename(head)) && s.slice(k + 1).some((x) => RUNNERS.includes(basename(x.w)) || RUNNER_WORD.test(x.w))) out.push({ unknown: true, dir: lost ? null : dir });
-      else if (!READERS.includes(basename(head))) {
+      else if (!(READERS.includes(basename(head)) || newReader(s, k)) && s.slice(k + 1).some((x) => RUNNERS.includes(basename(x.w)) || RUNNER_WORD.test(x.w))) out.push({ unknown: true, dir: lost ? null : dir });
+      else if (!(READERS.includes(basename(head)) || newReader(s, k))) {
         // A program in front of an interpreter (timeout 60 node x.js) or of a script typed by path (nice ./x.sh):
         // that file is read as if typed alone (Security on 51598c8).
         const j = s.findIndex((x, i) => i > k && INTERPRETERS.includes(basename(x.w)));
@@ -504,6 +521,60 @@ function aliasPushes(dir, name) {
 const BUILTIN = new Set("add am apply bisect blame branch cat-file checkout cherry-pick clean clone commit config describe diff diff-tree fetch for-each-ref grep hash-object init log ls-files ls-remote ls-tree merge merge-base mv notes pull rebase reflog remote reset restore rev-list rev-parse revert rm shortlog show show-ref stash status submodule switch symbolic-ref tag worktree".split(" "));
 // Programs that only read their words: `echo git push` and `grep push` run no git.
 const READERS = ["echo", "printf", "grep", "rg", "cat", "less", "head", "tail", "wc", "jq", "true", "false", "test", "[", "ls"];
+/** A segment (from its head) that only reads: a READERS program, or sed printing lines, `sed -n 1,2p FILE`, with
+ * no option but -n, -E, -r and one script of p commands, so no e, w, s///e, -i or -f can run or write (0.26.1). */
+function isReader(ws) {
+  // Named by a path (bin/cat, ./bin/cat), a reader is whatever was planted there (Prover on 130a63a).
+  if ((ws[0]?.w ?? "").includes("/")) return false;
+  const h = basename(ws[0]?.w ?? "");
+  if (READERS.includes(h)) return true;
+  if (h !== "sed" || ws.some((x) => x.dyn)) return false;
+  const rest = ws.slice(1).map((x) => x.w);
+  const opts = rest.filter((w) => w.startsWith("-")), args = rest.filter((w) => !w.startsWith("-"));
+  return opts.every((o) => /^-[nEr]+$/.test(o)) && args.length >= 1 && /^(\d+|\$)(,(\d+|\$))?p$/.test(args[0]);
+}
+/** One `cat > FILE <<'X'` (or >>, >|; "X" too) whose body ends the command at its delimiter: text into a file outside
+ * .git, which no shell reads (0.26.1). An unquoted delimiter expands $(...) and stays refused. */
+function quotedHereDocToFile(cmd, cwd) {
+  const m = /^\s*cat\s*(?:>>|>\||>)\s*([\w.\/-]+)\s*<<(-?)\s*(['"])([A-Za-z_]\w*)\3[ \t]*\n([\s\S]*)$/.exec(cmd);
+  // A relative path in the repo with no dot part: .git in any case (a case-insensitive disk), .husky, .gitconfig, a
+  // path outside the repo, may be a file git runs (Security on e44025b..615cac2).
+  if (!m || m[1].startsWith("/") || m[1].split("/").some((p) => p.startsWith("."))) return false;
+  // Nor typed from inside .git, nor through a symlink (gd -> .git): each part that exists must be a plain folder or
+  // file (Security on e44025b..ac3e68f, medium).
+  if (!cwd) return false;
+  try { if (realpathSync.native(cwd).split("/").some((p) => /^\.git$/i.test(p))) return false; } catch { return false; }
+  const parts = m[1].split("/").filter((p) => p && p !== ".");
+  for (let i = 1; i <= parts.length; i++) {
+    let st;
+    try { st = lstatSync(join(cwd, ...parts.slice(0, i))); } catch { break; }
+    if (st.isSymbolicLink()) return false;
+    // A file already there must be a plain file with one name: a hard link may be a hook (Security on e44025b..130a63a).
+    if (i === parts.length && (!st.isFile() || st.nlink !== 1)) return false;
+  }
+  // Nor into git's own folder or the one core.hooksPath names, wherever they are (Prover on ac3e68f).
+  let gitDirs;
+  try {
+    gitDirs = execFileSync(GIT, ["-c", "core.fsmonitor=false", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--git-path", "hooks"], { cwd, env: { ...gitEnv(process.env), GIT_TERMINAL_PROMPT: "0" }, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15000 })
+      .trim().split("\n").map((d) => { try { return realpathSync.native(d); } catch { return resolve(cwd, d); } });
+  } catch { return false; }
+  let parent = resolve(cwd, dirname(m[1]));
+  while (!existsSync(parent)) parent = dirname(parent);
+  // The disk's own case (realpathSync.native), and compared without case: HK is hk on a case-insensitive disk
+  // (Security on e44025b..130a63a).
+  // Nor under any git folder, a nested repo's included (a folder holding HEAD with config or hooks; Security on 6f498d1).
+  for (let d = realpathSync.native(parent); ; d = dirname(d)) {
+    if (existsSync(join(d, "HEAD")) && (existsSync(join(d, "config")) || existsSync(join(d, "hooks")))) return false;
+    if (dirname(d) === d) break;
+  }
+  const real = realpathSync.native(parent).toLowerCase();
+  if (gitDirs.some((d) => real === d.toLowerCase() || real.startsWith(d.toLowerCase() + "/"))) return false;
+  // The shell ends the body at the first line that is the delimiter (tabs stripped under <<-): it must be the last
+  // line, or the lines after it run as commands.
+  const lines = m[5].replace(/\n$/, "").split("\n");
+  const end = (l) => (m[2] ? l.replace(/^\t+/, "") : l).replace(/[ \t]+$/, "") === m[4];
+  return end(lines[lines.length - 1]) && lines.slice(0, -1).every((l) => !end(l));
+}
 const WRAPPERS = ["env", "command", "exec", "nohup", "time", "nice", "builtin", "sudo", "!", "{", "}", "if", "then", "do", "else", "elif", "while", "until"];
 const SHELLS = ["sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh", "mksh", "yash", "busybox"];
 // Interpreters whose file is read like a script; what it imports is piece 8's (jg 2026-11-02, "draw the line").

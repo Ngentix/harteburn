@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.26.1 — 2026-11-05
+
+**In a held repo, an agent can read files again.** After 0.26.0 the push gate refused commands that only read, such as `sed -n 1,2p FILE`, `grep -n S8 FILE | head`, or notes written with a quoted here-doc. These now run.
+- **What runs now:** `sed` printing lines (`sed -n 1,2p FILE`, with only `-n`, `-E` or `-r` and one script of `p` commands); plain readers piped into plain readers (`grep … | head`, `cat … | wc -l`); and `cat` writing a quoted here-doc to an ordinary file (`cat >> notes.md <<'EOF'` … `EOF`).
+- **What still gets "cannot tell which repo or branch this pushes":** these count only when every part of the command is a plain reader typed by its bare name (nothing like `NAME=` or `env` in front, not `bin/cat`) and the command is one pipeline. That means no `;`, `&&`, `||`, `&`, new line or parentheses, no alias, no file written, and no `less` or `rg`. A here-doc's file must be a relative path with no part starting with a dot. It must not go through a symlink or a hard link, and it must not sit under any git folder or the folder `core.hooksPath` names, in any case. Any other command is judged exactly as in 0.26.0.
+- **Still refused, as in 0.26.0:** running a code file (node, python and the like) that names git and push. That includes a test suite that pushes to a temporary repo, so run those in your own terminal. A reader that understood code was tried for this release and dropped: reading code as text cannot tell comments and strings from real code.
+- **Claude Team or Enterprise managed settings now pin your org to a release tag** (`"ref": "v0.26.1"`), so every member runs the version you reviewed (docs/install.md). Following `main` with `autoUpdate` is now an opt-in, and its trade-off is stated: every push to `main` reaches every member's machine. A commit SHA in `ref` never installs.
+- **For maintainers, the publish tool (`scripts/publish.mjs`) refuses a bad `publish.config.json` and names the fix.** It stops on a file that is not a JSON object, a deny term that is not a string, or a deny list with no real name in it (only blanks, punctuation or invisible characters). Invisible characters inside a name are removed before it is matched.
+- **After updating:** nothing to run. The refusal message is the same word for word.
+
 ## 0.26.0 — 2026-10-31
 
 **An agent can no longer push work that Security and the Prover have not passed (rc-security piece 4, slice 4a).** On 2026-10-31 a session in another repo pushed this one before its reviews. Now, in a repo whose house rules have a `## Security-domain paths` table, every agent's `git push` is checked first, whichever repo the session works in.
