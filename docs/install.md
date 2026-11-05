@@ -100,11 +100,16 @@ This is Claude's own Team or Enterprise plan, not the HarteBurn Team license (be
 ```json
 {
   "extraKnownMarketplaces": {
-    "ngentix": { "source": { "source": "github", "repo": "Ngentix/harteburn" } }
+    "ngentix": {
+      "source": { "source": "github", "repo": "Ngentix/harteburn", "ref": "main" },
+      "autoUpdate": true
+    }
   },
   "enabledPlugins": { "harteburn@ngentix": true }
 }
 ```
+
+`ref` is the branch `main`, never a commit. Claude Code clones that field with `git clone --branch`, and a commit SHA is not a branch, so the marketplace never installs. Leave `ref` as `main`. Each publish is a push to that branch, and `autoUpdate` follows it, so this policy is not edited again. A tag `vX.Y.Z` on a publish (`Ngentix/harteburn#vX.Y.Z`) is how one machine stays on that version. A policy that already has a commit SHA in `ref` is replaced with `main`.
 
 Claude Code registers the marketplace and installs the plugin at the start of each member's next session. Each member still needs read access to the repo. This is also the only documented route into cloud sessions.
 
