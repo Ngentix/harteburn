@@ -71,7 +71,7 @@ files every run loads stay short (rc-steward, jg 2026-10-28). Grouped by the fil
 ## agents/brief-compiler.md
 
 - **The compiler never drops a rule**: its output is an artifact that every session and every agent in the repo receives at start, so a dropped rule there means every agent works without it.
-- **Hard limit 29,000 characters** (jg, 2026-10-19): raised from 19,400 in two parts. **38,000 in four parts** (2026-10-30), for connector-cloud's brief; 39,000 was asked, but four parts hold 38,744.
+- **Hard limit 29,000 characters** (jg, 2026-10-19): raised from 19,400 in two parts. **38,000 in four parts** (2026-10-30), for connector-cloud's brief; 39,000 was asked, but four parts hold 38,744. **42,000 in five parts** (jg, 2026-11-06): connector-cloud's brief stood at 37,998 of 38,000 after a wording-only recompile, so its next rule could not fit; five parts hold 48,430. The compiler's "aim to stay under 27,000" went with it: a brief already past it could get back under only by dropping rules, which the line before forbids.
 - **Size is not a cost to minimise; never drop a real rule for space** (jg, 2026-10-14).
 
 ## skills/prove/SKILL.md

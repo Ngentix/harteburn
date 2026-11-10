@@ -1,14 +1,48 @@
 # Changelog
 
-## 0.26.1 — 2026-11-05
+## 0.28.2 — 2026-11-09
 
-**In a held repo, an agent can read files again.** After 0.26.0 the push gate refused commands that only read, such as `sed -n 1,2p FILE`, `grep -n S8 FILE | head`, or notes written with a quoted here-doc. These now run.
-- **What runs now:** `sed` printing lines (`sed -n 1,2p FILE`, with only `-n`, `-E` or `-r` and one script of `p` commands); plain readers piped into plain readers (`grep … | head`, `cat … | wc -l`); and `cat` writing a quoted here-doc to an ordinary file (`cat >> notes.md <<'EOF'` … `EOF`).
-- **What still gets "cannot tell which repo or branch this pushes":** these count only when every part of the command is a plain reader typed by its bare name (nothing like `NAME=` or `env` in front, not `bin/cat`) and the command is one pipeline. That means no `;`, `&&`, `||`, `&`, new line or parentheses, no alias, no file written, and no `less` or `rg`. A here-doc's file must be a relative path with no part starting with a dot. It must not go through a symlink or a hard link, and it must not sit under any git folder or the folder `core.hooksPath` names, in any case. Any other command is judged exactly as in 0.26.0.
-- **Still refused, as in 0.26.0:** running a code file (node, python and the like) that names git and push. That includes a test suite that pushes to a temporary repo, so run those in your own terminal. A reader that understood code was tried for this release and dropped: reading code as text cannot tell comments and strings from real code.
-- **Claude Team or Enterprise managed settings now pin your org to a release tag** (`"ref": "v0.26.1"`), so every member runs the version you reviewed (docs/install.md). Following `main` with `autoUpdate` is now an opt-in, and its trade-off is stated: every push to `main` reaches every member's machine. A commit SHA in `ref` never installs.
-- **For maintainers, the publish tool (`scripts/publish.mjs`) refuses a bad `publish.config.json` and names the fix.** It stops on a file that is not a JSON object, a deny term that is not a string, or a deny list with no real name in it (only blanks, punctuation or invisible characters). Invisible characters inside a name are removed before it is matched.
-- **After updating:** nothing to run. The refusal message is the same word for word.
+**A new key locks a leaked key out, and publish catches a customer name in full-width letters, with accents or split by invisible characters.** Two kinds of fix: for anyone who publishes with `scripts/publish.mjs`, and for a Team on the hosted service.
+- **Publish refuses a broken `publish.config.json`.** It refuses when the file is not a JSON object, a deny term is not text in quotes, no deny term holds a real letter or digit, or `allow` is not a list of path globs in quotes. Before, these quietly checked nothing.
+- **A hidden customer name is still found.** A name split by an invisible character, typed in full-width letters or written with accents is found in a file's lines and in its name. So is a key split by an invisible character in a file name. The files you publish are not changed.
+- **Images and fonts.** A published image must be a PNG with no text or metadata in it; any other image type, or a PNG carrying text, refuses and says what to strip. Fonts (`.woff`, `.woff2`) are not published. HarteBurn's own icon no longer carries its maker's metadata; the copy already published still does until it is published again.
+- **Rotating a key clears its devices.** A rotation of a seat key or the owner key, and a re-mint by Ngentix support, clears that license's devices, so the devices of a leaked key can never fill the device limit against the new one. Each person enters the new key on their own machines, as before.
+- **A replaced key can do nothing more.** A request or a rotation made with a key that was just replaced is refused with "the key was replaced", even if it was sent before the rotation finished.
+- **The audit log shows it.** Removing a member reads "removed <person>"; a rotation reads "rotated <person>" or "rotated owner key".
+- **If your own owner-key rotation is refused at the device limit,** ask Ngentix support: they re-mint the owner key, which clears its devices.
+- **Managed settings pin a release.** The install page's managed-settings policy now names a release tag (`v0.28.2`), so every member runs the version your org reviewed; following `main` with `autoUpdate` is an opt-in that says what it costs. An org pinned to `v0.26.1` moves by changing the tag; an org whose policy has no `ref` adds one.
+- **Not caught yet:** a name spelled with look-alike letters from another alphabet (a Cyrillic "о" for "o"), and text drawn in an image's pixels.
+
+## 0.28.1 — 2026-11-06
+
+**The architecture brief may be up to 42,000 characters, sent in up to five parts (jg 2026-11-06).** connector-cloud's brief stood at 37,998 of the 38,000 limit after a wording-only recompile, so its next rule could not fit. The hook now sends a fifth part to every session and every agent; five parts hold 48,430, so the gate's 42,000 always fits. Copy `templates/scripts/brief-stamp.mjs` and its test into each repo (`MAX_BRIEF_CHARS` 42000, `MAX_PARTS` 5). Sessions started before the update still ask for four parts; their fourth carries the rest, cut loudly at the cap if it must be.
+
+## 0.28.0 — 2026-11-06
+
+**You accept a Security finding with a click, not a typed line (rc-security piece 14).** When Security says "does not hold", the board's refusal now gives the builder one question to ask you, quoting the finding in the board's own words. You answer **Accept** or **Fix it first**. Nothing needs typing or copying.
+- **Only your click counts.** The board reads your answer where Claude Code recorded it in your session. A question with any wording changed, an answer filled in by an agent, a hook or an "allow always" rule, or a click in a subagent clears nothing.
+- **Your latest answer stands.** Fix it first after Accept takes the accept back, and the refusal says you chose it.
+- **Typed accept lines stop counting.** An `accept piece n:` line you typed before 2026-11-07 still counts. One typed after that clears nothing, and the refusal says so.
+- **On a Team,** only the security owner's click counts, as with Unlock.
+
+## 0.27.0 — 2026-11-06
+
+**The push gate is gone (rc-security piece 13).** It read every Bash command and every file a command ran, and refused whatever it could not read. That was far more obstruction than protection: plain `grep`, `cat` and `cp` commands were refused for naming a word. Nothing holds a push now, and pushing needs no review and no typed sentence.
+- **Your next session takes it out.** In each repo where 0.26.x installed its pre-push check, the next new session removes it. If the repo had its own pre-push hook, that hook goes back in its place in one step. It also removes the check's pointer and the repo's line in `~/.claude/harteburn/held-repos`. A pre-push hook that is not HarteBurn's is never touched. If git runs hooks from another folder, or the hook is a symlink, the session prints one line saying what to remove by hand. Close sessions that started before the update: they still call the old modes, which now do nothing.
+- **Until then, a push still works.** An old check left in place no longer checks anything. It runs your repo's own hook, and that hook's answer decides the push.
+- **The board still keeps the record.** Every Security and Prover run is recorded, and the Done lock still refuses a Done piece without a Security verdict.
+- **A low Security finding never holds a piece.** A "holds" that lists a medium, high or critical finding (`F1 (medium): …`) now refuses that piece like a "does not hold", until it is fixed or you accept it. This applies only to reviews from this version on.
+
+## 0.26.1 — 2026-11-04
+
+**A Security review the builder stopped no longer locks its piece for good (rc-security piece 11).** Before, if an agent stopped a Security review before it reached a verdict, the board refused that piece forever, even after a full review said "holds".
+- **You click, you don't type.** When Claude Code's own record shows the builder stopped the review, the board's refusal names one question for the builder to ask you once a later full review says "holds": "Security review … on <board> piece n was stopped by the builder before its verdict. A later full review of the same code says "holds". Unlock piece n so that review counts?", with the options **Unlock** and **Keep locked**. Your Unlock click counts only if that "holds" came before it.
+- **An agent can't click for you, or steer the click.** The board reads the click from Claude Code's record of your conversation. An answer the agent filled in itself, a question asked by a subagent, or any other wording, header, option or option text counts for nothing.
+- **Not a review that had found something.** If the stopped review's own record already reads like a finding ("does not hold", or a severity such as "medium:"), or that record is gone, no click clears it: fix what it found and review again.
+- **One per piece.** A second stopped review on the same piece keeps the piece locked, so stopping reviews until one passes never works. Move the work to a new piece.
+- **You see it.** The piece's line reads `security: review … stopped by the builder <time>; owner unlocked <time>`, next to its "holds". If you chose Keep locked, the refusal says when; choosing Unlock later still counts.
+- **On a Team, only the security owner's Unlock counts**, as with a risk accept: another seat's click is refused with "an unlock needs the security owner". Cloud, and a machine with no license, are unchanged.
+- **A Prover or Security verdict is no longer lost to how Claude Code writes a background command's notice:** a command line holding `>` or `&`, or a command that printed output before it was moved to the background, read as someone else's message and voided the run.
 
 ## 0.26.0 — 2026-10-31
 

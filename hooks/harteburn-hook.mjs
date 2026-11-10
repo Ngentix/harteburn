@@ -16,24 +16,23 @@
 //   steward prover  PostToolUse(Agent), SubagentStop -> after a Prover pass, the repo's disk steward
 //                   (`scripts/disk-sweep.sh --steward`), in the background
 //   steward gate    PreToolUse(Bash) -> before a command running verify.sh, the same, waited for (120 s)
-//   push            PreToolUse(Bash) -> before a command that pushes, the push gate (scripts/push-gate.mjs):
-//                   denies a pushed range with no covering Security holds and Prover proven
-//   prepush-install SessionStart -> in a held repo, git's own pre-push hook (scripts/pre-push.sh)
-//   pre-push <hook> <remote> <url>  run by that hook, inside git: the same check on the refs git sends
-//                   (exit 1 refuses); then the repo's own pre-push.local
+//   push, prepush-install  the push gate's modes, removed in 0.27.0 (jg 2026-11-05): no-ops, for a
+//                   session whose hooks.json was read before
+//   prepush-remove  SessionStart -> takes out the old pre-push shim, its pointer and the held-repos line
+//   pre-push <hook> <remote> <url>  run by an old shim, inside git (0.27.x): no check; the repo's own
+//                   pre-push.local, whose exit is the push's
 //
-// Rules: never fail a session. Every path exits 0; any error means "add nothing", except the push
-// gate, whose refusal is a deny and whose own error allows with one warning until it knows the repo is
-// held (then it refuses), and pre-push, run by git, which exits 1 to refuse, on any error too.
+// Rules: never fail a session. Every path exits 0; any error means "add nothing", except pre-push,
+// run by git, which passes the repo's own hook's exit on.
 // Each string stays under Claude Code's 10,000-character context cap (above it the
 // harness silently swaps the text for a file path), so oversize input is cut here,
 // loudly, instead of there, silently.
 
-import { readFileSync, existsSync, mkdirSync, appendFileSync, renameSync, statSync, chmodSync, openSync, readSync, closeSync, accessSync, writeFileSync, constants, realpathSync, rmSync, utimesSync, statfsSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, appendFileSync, renameSync, statSync, lstatSync, openSync, readSync, closeSync, accessSync, writeFileSync, constants, realpathSync, rmSync, utimesSync, statfsSync } from "node:fs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { GIT, gitEnv } from "../scripts/git-safe.mjs";
 import { createHash, randomBytes } from "node:crypto";
-import { join, dirname, basename, isAbsolute, resolve } from "node:path";
+import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reminderLines } from "../scripts/steward.mjs";
 import { behindNotice } from "../scripts/rules-fetch.mjs";
@@ -43,8 +42,9 @@ import { SEAT_PUBLIC_KEY, actorSeats, goLine } from "../scripts/seats.mjs";
 
 export const CAP = 10000;
 // Brief parts hooks.json sends, to sessions and agents alike (jg 2026-10-19: two parts → three;
-// 2026-10-30: four, when a project's brief outgrew three).
-export const MAX_PARTS = 4;
+// 2026-10-30: four, when a project's brief outgrew three; 2026-11-06: five, when a project's
+// brief reached 37,998 of 38,000).
+export const MAX_PARTS = 5;
 // The parts a session sends when its hook entries name no count: hooks.json before 0.13.0. A running
 // session reads hooks.json once, at its start, but runs this script as it is now (the Prover, 2026-10-19).
 export const OLD_CONFIG_PARTS = 2;
@@ -194,19 +194,22 @@ export function finalReply(transcriptPath, tailBytes = 262144) {
   } catch {
     return "";
   }
-  const rows = text.split("\n");
-  for (let i = rows.length - 1; i >= 0; i--) {
+  // The SubagentHandback message is what the caller got, so it is the reply even when the run wrote again
+  // after it (its own background command ended and woke it: Security r1 and r3 on piece 14, 2026-11-06).
+  // With no handback, the last text.
+  let said = "";
+  for (const row of text.split("\n").reverse()) {
     let o;
-    try { o = JSON.parse(rows[i]); } catch { continue; }
+    try { o = JSON.parse(row); } catch { continue; }
     if (o?.message?.role !== "assistant" || !Array.isArray(o.message.content)) continue;
     const c = o.message.content;
     const back = c.find((b) => b?.type === "tool_use" && b.name === "SubagentHandback" && typeof b.input?.message === "string");
-    const said = back ? back.input.message : [...c].reverse().find((b) => b?.type === "text" && String(b.text || "").trim())?.text;
-    if (!said) continue;
-    return String(said).replace(/\*/g, "").split("\n").map((l) => l.replace(/^\s*#+\s*/, "")).join("\n").trim()
-      .replace(/^verdict[^:\n]{0,40}:\s*/i, "");
+    if (back) { said = back.input.message; break; }
+    said ||= [...c].reverse().find((b) => b?.type === "text" && String(b.text || "").trim())?.text || "";
   }
-  return "";
+  if (!said) return "";
+  return String(said).replace(/\*/g, "").split("\n").map((l) => l.replace(/^\s*#+\s*/, "")).join("\n").trim()
+    .replace(/^verdict[^:\n]{0,40}:\s*/i, "");
 }
 
 /** The signed seats this license's person holds. Another person's seat on the file is left out.
@@ -252,6 +255,55 @@ export function recordAccepts(input, root) {
     transcript: String(input.transcript_path || ""), provider: account[1], account: account[2], ...boardId(root),
   }));
   appendFileSync(join(dir, "ledger.jsonl"), rows.join("\n") + "\n");
+}
+
+/**
+ * The one question that unlocks a Security run the builder stopped (PRD-RC-SECURITY-11, jg 2026-11-04:
+ * asked, never typed), with exactly these options; board-security.mjs reads the click from the transcript.
+ */
+// Every text in the dialog is fixed, so the builder writes none of what the owner reads (Security F2, Product on 9067d3a).
+export const UNLOCK_HEADER = "Unlock";
+export const UNLOCK_OPTIONS = ["Unlock", "Keep locked"];
+export const UNLOCK_DESCRIPTIONS = ["Count the later review for this piece.", "The piece stays locked until you choose Unlock."];
+export const unlockQuestion = (piece, run, board) =>
+  `Security review ${run} on ${board} piece ${piece} was stopped by the builder before its verdict. A later full review of the same code says "holds". Unlock piece ${piece} so that review counts?`;
+const UNLOCK_FORM = /^Security review (toolu_[A-Za-z0-9]+) on [A-Za-z0-9._-]+ piece (\d+) was stopped by the builder before its verdict\. A later full review of the same code says "holds"\. Unlock piece \2 so that review counts\?$/;
+
+/**
+ * The one question that accepts an open Security finding (PRD-RC-SECURITY-14, jg 2026-11-05: a click,
+ * never a typed line). The finding is the board's own text, one line; header and options are fixed,
+ * the header being the yes-option, as Unlock's.
+ */
+export const ACCEPT_HEADER = "Accept";
+export const ACCEPT_OPTIONS = ["Accept", "Fix it first"];
+export const ACCEPT_DESCRIPTIONS = ["Count this finding as an accepted risk, so the piece can be Done with it open.", "The piece stays refused until the finding is fixed and Security holds."];
+export const acceptQuestion = (piece, board, finding) => `Security found this on ${board} piece ${piece}:\n${finding}\nAccept the risk?`;
+// A finding holding any line break never matches, so no finding can carry a second question's tail.
+export const ACCEPT_FORM = /^Security found this on ([A-Za-z0-9._-]+) piece (\d+):\n([^\n\r\u2028\u2029\u0085]+)\nAccept the risk\?$/;
+
+/**
+ * One ledger row per unlock or accept question in an AskUserQuestion call (PostToolUse), with the
+ * session's transcript and the call's id. The row only points: the board counts the click it finds there.
+ * The mode keeps its name, `unlock`, though it records both (docs/triage.md).
+ */
+export function recordUnlocks(input, root, opts = {}) {
+  const qs = Array.isArray(input?.tool_input?.questions) ? input.tool_input.questions : [];
+  const asked = qs.map((q) => UNLOCK_FORM.exec(String(q?.question ?? ""))).filter(Boolean);
+  const accepts = qs.map((q) => ACCEPT_FORM.exec(String(q?.question ?? ""))).filter(Boolean);
+  if ((!asked.length && !accepts.length) || !root) return;
+  let gitDir = git(root, ["rev-parse", "--git-common-dir"]);
+  if (!gitDir) return;
+  if (!isAbsolute(gitDir)) gitDir = join(root, gitDir);
+  const dir = stateDir(gitDir);
+  mkdirSync(dir, { recursive: true });
+  const ts = new Date().toISOString();
+  // The clicker's seats, as on an accept: on a Team only the security owner's click unlocks (Security F1 on ace613a).
+  const seats = licenseSeats(opts);
+  const point = { ts, session: input.session_id || "", transcript: String(input.transcript_path || ""), tool_use_id: String(input.tool_use_id || "") };
+  appendFileSync(join(dir, "ledger.jsonl"), [
+    ...asked.map((m) => ({ event: "unlock", id: randomBytes(6).toString("hex"), ...point, piece: Number(m[2]), run: m[1], ...(seats.length && { seats }), ...boardId(root) })),
+    ...accepts.map((m) => ({ event: "accept", via: "dialog", id: randomBytes(6).toString("hex"), ...point, piece: Number(m[2]), ...(seats.length && { seats }), ...boardId(root) })),
+  ].map((r) => JSON.stringify(r)).join("\n") + "\n");
 }
 
 /**
@@ -834,9 +886,14 @@ function main(mode) {
     case "touch":
       touch(input, cwd);
       return;
-    case "push": // handled before main, at the foot of this file (pushMode): it waits on the gate's import
-    case "prepush-install": // the same (prePushInstall)
-    case "pre-push": // the same (prePushMode)
+    case "unlock":
+      // PostToolUse(AskUserQuestion): the owner's Unlock question (PRD-RC-SECURITY-11).
+      try { recordUnlocks(input, sessionTree(input, cwd) || root); } catch {}
+      return;
+    case "push": // the push gate, removed in 0.27.0 (jg 2026-11-05): a session started before still calls it
+    case "prepush-install": // the same
+    case "pre-push": // run by an old shim, inside git: handled at the foot of this file (prePushMode)
+    case "prepush-remove": // the same (prepushRemove)
       return;
     default:
       return;
@@ -853,152 +910,70 @@ function startedDirectly() {
     return false;
   }
 }
-/** The push gate's answer for this Bash command, as Claude Code reads it; nothing when it says nothing. */
-export async function pushMode(input) {
-  const command = String(input?.tool_input?.command ?? "");
-  HELD_FILE = await heldListFile();
-  const kept = await keepHook(input.cwd || process.cwd(), command);
-  if (kept) return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: kept } };
-  // The same reading as the gate's own first check (scripts/push-gate.mjs RUNS_SCRIPT), on the text with
-  // quotes and escapes out (automated review of 2fe32a3).
-  const plain = command.replace(/["'\\]/g, "");
-  if (!/\b(push|git)\b/.test(plain) && !/[$`*?[]/.test(command) && !/(^|[\s;&|(])(\S*\/|(ba|z|da|k|fi|c|tc|mk|ya)?sh(\s|$)|busybox\s|eval(\s|$)|xargs\s|env\s|source\s|\.\s|(p?npm|yarn(pkg)?|bun)(\s|$)|(node|deno|tsx|ts-node|zx|python3?|ruby|perl|php)(\s|$))/.test(plain)) return null;
-  const { pushGate } = await import("../scripts/push-gate.mjs");
-  const r = pushGate(command, input.cwd || process.cwd());
-  if (!r.deny && !r.warn) return null;
-  return {
-    ...(r.deny && { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: r.deny } }),
-    ...(r.warn && { systemMessage: r.warn }),
-  };
-}
-
-/** Before every Bash command in a repo the hook was installed in (its pointer exists): a hook removed, changed or
- * made unrunnable is put back, as a new session would, so a push the gate cannot read still meets it; hooks moved
- * elsewhere refuse every command but the undo (Prover 18-24 on e6314f4; jg 2026-11-01). The refusal, or "". */
-async function keepHook(cwd, command) {
-  const pg = await import("../scripts/push-gate.mjs");
-  const here = repoRoot(cwd), listed = heldList();
-  // Another repo's hook that stays off: only a command that runs no program but the readers below, so nothing it
-  // runs could push there unchecked; git is no reader, since a repo's own config and hooks run programs (jg
-  // 2026-11-01, option 1; automated reviews and Prover x2 on 78c6e77).
-  // No redirect either: a reader that writes a file is no reader (automated review of 0e3ad7f).
-  const placed = () => !/[$`>]/.test(command) && command.split(/[;&|\n()]+/).every((seg) => { const w = seg.trim().replace(/["'\\]/g, "").split(/\s+/)[0]; return !w || reader(w); });
-  // The session's repo and every repo the hook was installed in: a command can push anywhere (Prover 18-24 on b8a93c6).
-  for (const root of new Set([here, ...listed].filter(Boolean))) {
-    const no = await keepOne(root, command, pg, listed.includes(root));
-    if (no && (root === here || !placed())) return root === here ? no : `${no} Until then only commands that read files, typed by their full path (/bin/ls, /bin/cat, /usr/bin/grep and the like), run here: any other program could push there unchecked.`;
-  }
-  return "";
-}
-// Programs that only read, with no option that runs another (no find -exec, sed e, awk system(), rg --pre, sort
-// --compress-program) or writes (cp, mv, rm, touch, uniq's second operand; automated reviews of 0e3ad7f, e82acdc).
-const READERS = new Set("ls cat head tail wc grep diff stat basename dirname realpath readlink".split(" "));
-// No printf: -v sets a variable, PATH among them (automated review of e82acdc).
-const BUILTINS = new Set("cd echo pwd true false".split(" "));
-/** A shell builtin, or a reader typed by its full path in the system's own folders: a bare name is the shell's to
- * look up, on a PATH the agent can change (automated review of e82acdc). */
-const reader = (w) => BUILTINS.has(w) || (/^\/(usr\/)?bin\/[a-z]+$/.test(w) && READERS.has(w.split("/").pop()));
-/** Every repo the hook was installed in, one work tree per line, beside the transcripts folder the pointer names. */
-async function heldListFile() {
-  const { projectsDir } = await import("../scripts/board-security.mjs");
-  return join(dirname(projectsDir(process.env)), STATE_DIR, "held-repos");
-}
-let HELD_FILE = "";
-function heldList() {
-  try { return readFileSync(HELD_FILE, "utf8").split("\n").filter(Boolean); } catch { return []; }
-}
-async function keepOne(root, command, { hookSite, PRE_PUSH, ourHook, pointerText }, listed) {
-  let s;
-  try { s = hookSite(root); } catch {}
-  // A listed repo git cannot read where it was (its .git moved aside): its hook could be removed unseen, so it is
-  // broken until it is back (Prover 18-24 on 78c6e77, D1).
-  // A folder gone is no let-go either: a moved repo pushes from its new path unchecked (automated review of 0e3ad7f).
-  // Git that cannot run is broken too (jg 2026-11-02, option A; automated review of d36178a); the git is root's
-  // own, never PATH's (scripts/git-safe.mjs). Named as git, never as a moved folder (Prover 4-10 on e82acdc).
-  if (!s && !git("/", ["--version"])) return listed ? `Push gate: git (${GIT}) cannot run, so ${root}'s pre-push check cannot be kept. Install it (on a Mac: xcode-select --install), then push.` : ""; // from "/": a gone folder is no broken git
-  if (!s || s.root !== root) return listed ? `Push gate: git cannot read ${root} (the folder or its .git was moved, removed or broken), so its pre-push check cannot be kept. Put it back; if it is gone for good, remove its line from ${HELD_FILE} in your own terminal.` : "";
-  // Installed here once: the pointer, the shim or the list is left, and the rest is put back. All removed in one
-  // command, or the list emptied, is piece 8's (Prover 18-24 on 4edfbd9 and 78c6e77); the table is read only then.
-  let shim = false;
-  try { shim = ourHook(readFileSync(s.hook)); } catch {}
-  if (!existsSync(s.pointer) && !shim && !listed) return "";
-  // The undo alone: its folder in plain path characters, so no shell metacharacter rides it (automated review of b8a93c6).
-  if (!s.own) return /^\s*git(\s+-C\s+[A-Za-z0-9_./~+-]+)?\s+config\s+(--local\s+)?--unset\s+core\.hookspath\s*$/i.test(command) ? "" : `Push gate: ${s.root} now runs git hooks from ${s.dir}, so its pre-push check does not run. Undo that (git -C ${s.root} config --unset core.hooksPath), then push.`;
-  // The pointer byte for byte as this session writes it, from its own environment: a forged plugin-root is put
-  // back before the next command (Prover 18-24 on 4edfbd9, P3 and P4).
-  const ok = () => { try { return (statSync(s.hook).mode & 0o100) !== 0 && readFileSync(s.hook).equals(PRE_PUSH) && readFileSync(s.pointer, "utf8") === pointerText(process.env); } catch { return false; } };
-  if (ok()) return "";
-  // A failed put-back leaves it off, which refuses: it never throws past the gate (Prover 4-10 on b8a93c6).
-  let why = "";
-  try { why = (await prePushInstall(root))?.systemMessage?.replace(/^HarteBurn: /, "") || ""; } catch (e) { why = `it could not be put back (${e.code || String(e.message).split("\n")[0]}), so every push is refused until the owner fixes it.`; }
-  if (ok()) return "";
-  // A new session cannot put it back where the install refuses (both pre-push and pre-push.local): say what can (Prover 4-10 on 4edfbd9).
-  // Listed with nothing left and no table now: only the owner knows it was meant, so say how to let it go.
-  return `Push gate: ${s.root}'s pre-push check is missing or changed${why ? `: ${why}` : `. Start a new session in ${s.root} to put it back, then push.${listed ? ` If it no longer needs the check, remove its line from ${HELD_FILE} in your own terminal.` : ""}`}`;
-}
+/** The marker line every version of the old pre-push shim (scripts/pre-push.sh, removed in 0.27.0) kept as its
+ * second line: how prepush-remove knows a hook is ours. */
+export const SHIM_MARKER = "# HarteBurn's pre-push check, put here by the plugin because this repo has a security-domain table.";
+const ourShim = (b) => String(b).split("\n")[1] === SHIM_MARKER;
 
 /**
- * SessionStart, in a held repo only: git's pre-push hook (scripts/pre-push.sh) in the common dir's
- * hooks, and <git-common-dir>/harteburn/plugin-root naming this plugin and the folder its transcripts are
- * read from, resolved now: a push's own environment never chooses it (automated review of b6aa603). The
- * shim names neither, so its bytes never change. A repo's own pre-push becomes pre-push.local, once.
- * Hooks run from anywhere else (a global or tracked folder): nothing written, one line saying what to add.
+ * SessionStart, 0.27.0 on: takes out what the push gate installed (jg 2026-11-05, the gate removed), in the
+ * session's repo and every repo on the account's held-repos list: the shim first (the repo's own
+ * pre-push.local renamed over it in one step, so there is no moment without its hook), then the pointer, then
+ * the list line. Shim before pointer: a shim whose pointer is gone refuses every push. A hook that is not our
+ * shim is never touched. The list is read only from the account home, never from a home a project's settings
+ * can set (B7). Never throws: anything it cannot do is one line naming the command to run by hand.
  */
-export async function prePushInstall(cwd) {
-  const { heldRepo, PRE_PUSH, ourHook, hookSite, pointerText } = await import("../scripts/push-gate.mjs");
-  const { projectsDir } = await import("../scripts/board-security.mjs");
-  const root = repoRoot(cwd);
-  if (!root || !heldRepo(root)) return null;
-  const { dir, own, hook, pointer: ptr, common } = hookSite(root), local = `${hook}.local`, config = dirname(projectsDir(process.env));
-  const say = (s) => ({ systemMessage: `HarteBurn: ${s}` });
-  // The check execs node, so the repo's own hook still gets git's stdin, as pre-push.local (Architect on 5271ab8).
-  if (!own) return say(`${root} runs git hooks from ${dir}, so its pre-push check is not installed. To add it, move ${join(dir, "pre-push")} (if there is one) to ${join(dir, "pre-push.local")}, then make ${join(dir, "pre-push")} an executable sh script whose last line is: CLAUDE_CONFIG_DIR="${config}" exec node "${PLUGIN_ROOT}/hooks/harteburn-hook.mjs" pre-push "$0" "$@" (it names this version's folder: redo it after an update).`);
-  let mine = false, older = false;
-  try { const b = readFileSync(hook); mine = b.equals(PRE_PUSH); older = ourHook(b); } catch {}
-  // An older version's shim is ours: overwritten, never kept as the repo's own (Architect on b6aa603).
-  if (!mine && !older && existsSync(hook)) {
-    if (existsSync(local)) return say(`${root} has both .git/hooks/pre-push and pre-push.local, so its pre-push check is not installed. Merge them into pre-push.local, then start a new session.`);
-    renameSync(hook, local);
+export async function prepushRemove(cwd, { home = licenseHome() } = {}) {
+  const { hooksDir } = await import("../scripts/board-security.mjs"); // it imports this module
+  const list = join(home, "held-repos");
+  let listed = [];
+  try { listed = readFileSync(list, "utf8").split("\n").filter(Boolean); } catch {}
+  const here = repoRoot(cwd);
+  const say = [], kept = [];
+  for (const repo of new Set([here, ...listed].filter(Boolean))) {
+    let keep = false;
+    try { keep = removeOne(repo, say, hooksDir); } catch (e) { keep = true; say.push(`${repo}: ${e.code || String(e.message).split("\n")[0]}`); }
+    if (keep && listed.includes(repo)) kept.push(repo);
   }
-  if (!mine) {
-    mkdirSync(dirname(hook), { recursive: true });
-    const tmp = `${hook}.${process.pid}.tmp`;
-    writeFileSync(tmp, PRE_PUSH, { mode: 0o755 });
-    renameSync(tmp, hook);
-  } else if ((statSync(hook).mode & 0o111) !== 0o111) chmodSync(hook, 0o755); // git skips a hook it cannot run (Prover 18-24 on 55f4b1c)
-  const want = pointerText(process.env);
-  let had = "";
-  try { had = readFileSync(ptr, "utf8"); } catch {}
-  if (had !== want) { mkdirSync(dirname(ptr), { recursive: true }); writeFileSync(ptr, want); }
-  // Listed, so every later command in any session repairs it too (Prover 18-24 on b8a93c6).
-  const list = await heldListFile();
-  let known = [];
-  try { known = readFileSync(list, "utf8").split("\n"); } catch {}
-  // The repo, not the worktree a session started in: the hook lives in the common dir, and a worktree removed is
-  // routine (Prover 4-10 on d36178a).
-  const entry = basename(common) === ".git" ? dirname(common) : root;
-  if (!known.includes(entry)) { mkdirSync(dirname(list), { recursive: true }); appendFileSync(list, `${entry}\n`); }
-  return null;
+  if (listed.length) {
+    try { if (kept.length) writeFileSync(list, kept.map((r) => `${r}\n`).join("")); else rmSync(list, { force: true }); } catch (e) { say.push(`could not update ${list} (${e.code || e.message}): remove it by hand`); }
+  }
+  return say.length ? { systemMessage: `HarteBurn: the push gate is removed (0.27.0), but some of what it installed is left: ${say.join("; ")}.` } : null;
+}
+/** One repo: true when something of ours is left there on purpose (its line stays on the list). */
+function removeOne(repo, say, hooksDir) {
+  if (!existsSync(repo)) return false; // a folder gone: nothing to remove, its line goes
+  const root = repoRoot(repo), common = root && commonDir(root);
+  if (!common) return false;
+  const pointer = join(stateDir(common), "plugin-root"), hook = join(common, "hooks", "pre-push"), local = `${hook}.local`;
+  let dir = join(common, "hooks");
+  try { dir = hooksDir(root, common); } catch {}
+  let st = null;
+  try { st = lstatSync(hook); } catch {}
+  const held = existsSync(pointer);
+  // Hooks run from elsewhere, or a symlink: the hook git runs may still be our shim, which refuses every push
+  // once its pointer is gone, so the pointer stays until the owner has looked.
+  if (dir !== join(common, "hooks") || st?.isSymbolicLink()) {
+    if (!held) return false;
+    say.push(`${root} runs its pre-push hook from ${dir !== join(common, "hooks") ? join(dir, "pre-push") : `a symlink at ${hook}`}: if that is HarteBurn's old check, remove it (or move pre-push.local into its place), then rm ${pointer}`);
+    return true;
+  }
+  if (st?.isFile() && ourShim(readFileSync(hook))) {
+    if (existsSync(local)) renameSync(local, hook); else rmSync(hook, { force: true });
+  }
+  rmSync(pointer, { force: true });
+  return false;
 }
 
 /**
- * git's pre-push hook, through scripts/pre-push.sh: argv is the hook's own path, the remote's name and
- * URL; stdin is git's ref lines. Refused: exit 1 with the reason on stderr. Passed: the repo's own
- * pre-push.local runs with the same argv and stdin, and its exit is the push's. Any failure to run
- * the check refuses: this hook exists only where the repo was held.
+ * git's pre-push hook, through a shim an older version installed (kept until no held-repos line and no kept
+ * pointer is left: docs/triage.md, Architect on 3a56453): no check
+ * now. The repo's own pre-push.local runs with git's argv and stdin and the environment the shim saved, and
+ * its exit is the push's; with none, the push goes on.
  */
 export async function prePushMode([hook = "", ...argv]) {
   let input = Buffer.alloc(0);
   try { input = readFileSync(0); } catch {}
-  const { prePushGate } = await import("../scripts/push-gate.mjs");
-  // From inside the git dir git gives the hook GIT_DIR=.: absolute, it means the same from the work tree.
-  const given = process.env.GIT_DIR;
-  if (given && !isAbsolute(given)) process.env.GIT_DIR = resolve(given);
-  let r;
-  try { r = prePushGate(argv, input.toString("utf8").split("\n").filter((l) => l.trim()), process.cwd(), process.env); }
-  finally { if (given !== undefined) process.env.GIT_DIR = given; } // the repo's own hook gets git's value
-  if (r.warn) process.stderr.write(`${r.warn}\n`);
-  if (r.deny) { process.stderr.write(`${r.deny}\n`); return 1; }
   const local = `${hook}.local`;
   try { accessSync(local, constants.X_OK); } catch { return 0; }
   // With the environment git gave the hook: the shim's CLAUDE_CONFIG_DIR is the check's alone (Architect on aa9cb41).
@@ -1010,26 +985,20 @@ export async function prePushMode([hook = "", ...argv]) {
   // macOS reports that as "Unknown system error -8" (errno 8), not the name ENOEXEC.
   const noShebang = run.error?.code === "ENOEXEC" || run.error?.errno === -8 || run.error?.code === "Unknown system error -8";
   if (noShebang) run = spawnSync("/bin/sh", [local, ...argv], opts);
-  if (run.error) process.stderr.write(`HarteBurn's pre-push check passed, but the repo's own hook ${local} could not run (${run.error.code || run.error.message}), so this push is refused.\n`);
+  if (run.error) process.stderr.write(`The repo's own pre-push hook ${local} could not run (${run.error.code || run.error.message}), so this push is refused.\n`);
   return run.status ?? 1;
 }
 
-// Not awaited at the top: the gate's modules import this one, so this module must finish loading first.
-if (process.argv[1] && startedDirectly() && process.argv[2] === "push") {
-  pushMode(readStdin())
-    .then((out) => { if (out) process.stdout.write(JSON.stringify(out)); })
-    .catch(() => {}) // never fail a session
-    .finally(() => { process.exitCode = 0; }); // no process.exit: on macOS a pipe write is asynchronous, and exit could cut the deny short
-} else if (process.argv[1] && startedDirectly() && process.argv[2] === "pre-push") {
+if (process.argv[1] && startedDirectly() && process.argv[2] === "pre-push") {
   prePushMode(process.argv.slice(3))
     .then((code) => { process.exitCode = code; })
     .catch((e) => {
-      process.stderr.write(`HarteBurn's pre-push check could not run (${String(e?.message || e).split("\n")[0]}), so this push is refused. To push without the check, type in your own terminal: git push --no-verify\n`);
+      process.stderr.write(`HarteBurn could not run the repo's own pre-push hook (${String(e?.message || e).split("\n")[0]}), so this push is refused.\n`);
       process.exitCode = 1;
     });
-} else if (process.argv[1] && startedDirectly() && process.argv[2] === "prepush-install") {
+} else if (process.argv[1] && startedDirectly() && process.argv[2] === "prepush-remove") {
   const input = readStdin();
-  prePushInstall(process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd())
+  prepushRemove(process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd())
     .then((out) => { if (out) process.stdout.write(JSON.stringify(out)); })
     .catch(() => {}) // never fail a session
     .finally(() => { process.exitCode = 0; });

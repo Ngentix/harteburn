@@ -513,12 +513,9 @@ export function runsFromLedger(rec, ledgerRows) {
   let added = 0;
   for (const row of ledgerRows || []) {
     if (row?.board !== rec.id || !row.ts) continue;
-    // A run's end (SubagentStop, retro 2026-10-23) carries its minutes for /retro; it is not a second run.
-    if (row.event === "stop") continue;
-    // A touch row (rc-disk piece 4) names another repo the objective changed; it is not a run.
-    if (row.event === "touch") continue;
-    // The owner's own rows (an acceptance, a named test account) are not runs.
-    if (row.event === "accept" || row.event === "account") continue;
+    // Only a dispatch is a run: every other row carries an event (a stop, a touch, an accept, an account,
+    // a session, a go, an unlock), as board-security reads them (Architect on b16b770: an unlock row became a run).
+    if (row.event != null) continue;
     const id = ledgerId(row);
     if (have.has(id)) continue;
     rec.runs.push({

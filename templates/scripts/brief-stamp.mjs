@@ -42,10 +42,10 @@ import { fileURLToPath } from "node:url";
 export const BRIEF = "docs/architecture/BRIEF.md";
 export const COVERAGE = "docs/architecture/BRIEF-coverage.md";
 // The hook cuts any one context string at 10,000 characters, so a brief over one string's room is sent
-// in up to four parts, each split at a "## " heading (jg 2026-10-14: size is fine; never drop a rule for space).
-export const MAX_BRIEF_CHARS = 38000; // four hook parts of 10,000 less their heads, 38,744 (29,000 in three until 2026-10-30; 19,400 in two until jg, 2026-10-19)
+// in up to five parts, each split at a "## " heading (jg 2026-10-14: size is fine; never drop a rule for space).
+export const MAX_BRIEF_CHARS = 42000; // within five hook parts of 10,000 less their heads, 48,430 (38,000 in four until jg, 2026-11-06; 29,000 in three until 2026-10-30; 19,400 in two until jg, 2026-10-19)
 export const HOOK_CAP = 10000;
-export const MAX_PARTS = 4; // the parts the plugin's hooks.json sends: brief-session and brief-subagent 1–4
+export const MAX_PARTS = 5; // the parts the plugin's hooks.json sends: brief-session and brief-subagent 1–5
 // briefHead and briefParts must stay identical to the copies in the plugin's hooks/harteburn-hook.mjs;
 // the plugin's tests compare them.
 export const HOOK_HEAD =

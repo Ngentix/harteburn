@@ -154,13 +154,13 @@ There is no Engineer agent. The owner decided on 2026-10-14 that the Tech Lead b
 
 On a Team license, each person has one seat. Cloud, Enterprise and no license have no seat checks. A go is the whole message, one line: `go piece n:`
 
-**Not active yet.** Until the production signing key ships, no seat verifies: on a Team license the board refuses every Done-line, scope or architecture-doc change and every risk accept, and an accept cannot clear a "does not hold" at the push gate.
+**Not active yet.** Until the production signing key ships, no seat verifies: on a Team license the board refuses every Done-line, scope or architecture-doc change, every risk accept and every Unlock click.
 
 | Seat | What they can do |
 |---|---|
 | Product owner | Type `go piece n:` for a Done-line change or a scope change. Add a member and remove one. |
 | Architecture owner | Type `go piece n:` when `docs/architecture/` changed. |
-| Security owner | Accept a risk: `accept piece <n>: <the finding>`, alone in one message. No other seat's accept counts, on the board or at the push gate. |
+| Security owner | Accept a risk: click **Accept** on the question the board's refusal prints (an `accept piece <n>:` line typed before 2026-11-07 still counts). No other seat's accept counts. Click Unlock on a Security review the builder stopped; no other seat's click counts. |
 | Builder | Sign off its own piece. The board shows "signed off by its builder". That line does not clear the other seats. |
 | Reader | Read the board. A write is refused. |
 | Admin | Add a member and remove one, the same as the product owner. |
@@ -170,6 +170,7 @@ The board's refusals, word for word:
 - "Piece n: a scope change needs the product owner to type "go piece n:" (docs/roles.md#team-seats)"
 - "Piece n: an architecture-doc change needs the architecture owner to type "go piece n:" (docs/roles.md#team-seats)"
 - "Piece n: a risk accept needs the security owner (docs/roles.md#team-seats)"
+- "Piece n: an unlock needs the security owner (docs/roles.md#team-seats)"
 
 The org on a new member is the caller's. Naming another org is refused. Members are added with `POST /v1/team/members` (body `{"person": "<email>", "role": "<seat>"}`; the reply carries their seat key) and removed with `DELETE /v1/team/members` (body `{"person": "<email>"}`), by the product owner or admin. A removed member cannot write, including while offline grace would still pass. One key may be used on 3 devices within 60 minutes. The owner confirmed that limit on 2026-10-30. A fourth device is refused: "this key is on too many devices (docs/roles.md#team-seats)". A request that names no device is refused: "update HarteBurn: this version sends no device id (docs/roles.md#team-seats)".
 
@@ -185,7 +186,7 @@ Every refusal names this page.
 
 **Reads:** the repo's architecture pages and house rules.
 
-**Writes:** `docs/architecture/BRIEF.md` (up to 38,000 characters, every rule a standalone sentence) and `docs/architecture/BRIEF-coverage.md`, which accounts for every rule line in the sources.
+**Writes:** `docs/architecture/BRIEF.md` (up to 42,000 characters, every rule a standalone sentence) and `docs/architecture/BRIEF-coverage.md`, which accounts for every rule line in the sources.
 
 **Never:** drops a real rule for space, edits a source page, or commits.
 

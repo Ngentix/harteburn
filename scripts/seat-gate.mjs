@@ -1,8 +1,8 @@
 // The board's seat check (hb-seats-1 piece 4). On a Team license, a done piece whose Done lines,
 // scope or docs/architecture changed since it started needs the right seat's typed go. A risk
-// accept counts only from the security owner. Cloud, and a machine with no license, is unchanged.
-// A go or an accept counts only when the transcript shows the owner typed that one line, and the
-// seats copied onto the row still verify.
+// accept (typed, or an Accept click), and an Unlock click, count only from the security owner. Cloud, and a machine with no license, is unchanged.
+// A go or an accept counts only when the transcript shows the owner typed that one line, or clicked the
+// board's question, and the seats copied onto the row still verify.
 
 import { execFileSync } from "node:child_process";
 import { readLicense } from "./login.mjs";
@@ -55,12 +55,29 @@ export function seatGate(root, rec, stamps, ledger, { env = process.env, now = D
   const drop = new Set();
   const gos = trustedGos(root, rec.id, ledger, env);
   for (const a of acceptances(root, rec.id, ledger, { env })) {
+    if (a.via === "dialog") continue;
     const row = (ledger || []).find((r) => r?.id === a.id);
     const ok = verifiedSeats({ org_id: orgId, seats: row?.seats }, publicKey, now).some((s) => s.role === "security-owner");
     if (!ok) {
       drop.add(a.id);
       problems.push(seatRefusal(`Piece ${a.piece}: a risk accept needs the security owner`));
     }
+  }
+  // An Accept click is judged by its stored row, as an Unlock's is: on a Team only the security owner's counts.
+  // Every other seat's click is taken out before the board reads the latest one, so a reader's Fix it first
+  // never undoes the owner's Accept; it is refused aloud only when it clicked Accept (Security F1 on 999cbc4).
+  const clickedAccept = new Set(acceptances(root, rec.id, ledger, { env, all: true }).filter((a) => a.via === "dialog" && a.word === "Accept").map((a) => a.id));
+  for (const row of acceptances(root, rec.id, ledger, { rows: true })) {
+    if (row.via !== "dialog" || verifiedSeats({ org_id: orgId, seats: row.seats }, publicKey, now).some((s) => s.role === "security-owner")) continue;
+    drop.add(row.id);
+    if (clickedAccept.has(row.id)) problems.push(seatRefusal(`Piece ${row.piece}: a risk accept needs the security owner`));
+  }
+  // An Unlock click clears a Security lock as an accept does, so it needs the same seat (Security F1 on ace613a).
+  for (const row of ledger || []) {
+    if (row?.event !== "unlock" || row.board !== rec.id) continue;
+    if (verifiedSeats({ org_id: orgId, seats: row.seats }, publicKey, now).some((s) => s.role === "security-owner")) continue;
+    drop.add(row.id);
+    problems.push(seatRefusal(`Piece ${row.piece}: an unlock needs the security owner`));
   }
   for (const p of rec.pieces || []) {
     const finished = ["done", "dropped"].includes(p.state);
@@ -85,6 +102,6 @@ export function seatGate(root, rec, stamps, ledger, { env = process.env, now = D
   return {
     problems,
     shown,
-    ledger: drop.size ? (ledger || []).filter((r) => !(r?.event === "accept" && drop.has(r.id))) : ledger,
+    ledger: drop.size ? (ledger || []).filter((r) => !((r?.event === "accept" || r?.event === "unlock") && drop.has(r.id))) : ledger,
   };
 }

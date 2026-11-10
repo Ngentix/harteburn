@@ -15,7 +15,11 @@ import { GIT, gitEnv } from "./git-safe.mjs";
 import { createHash } from "node:crypto";
 import { parsePathTable, globRe } from "./globs.mjs";
 import { ledgerId, heldToRules, DONE_RULES_FROM } from "./board-schema.mjs";
-import { finalReply, LOCAL_FILES_HEAD, TEST_ACCOUNT } from "../hooks/harteburn-hook.mjs";
+import { finalReply, LOCAL_FILES_HEAD, TEST_ACCOUNT, unlockQuestion, UNLOCK_HEADER, UNLOCK_OPTIONS, UNLOCK_DESCRIPTIONS, acceptQuestion, ACCEPT_FORM, ACCEPT_HEADER, ACCEPT_OPTIONS, ACCEPT_DESCRIPTIONS } from "../hooks/harteburn-hook.mjs";
+export { unlockQuestion, UNLOCK_HEADER, UNLOCK_OPTIONS, UNLOCK_DESCRIPTIONS, acceptQuestion, ACCEPT_HEADER, ACCEPT_OPTIONS, ACCEPT_DESCRIPTIONS };
+// A typed "accept piece n:" line counts only when typed before this (PRD-RC-SECURITY-14): from then on
+// the owner accepts by a click on acceptQuestion. Earlier typed lines keep counting (jg 2026-11-05).
+export const TYPED_UNTIL = "2026-11-07T00:00:00.000Z";
 import { BOARD_DIR, LEGACY, boardDir, stateDir } from "./paths.mjs";
 
 export const HOUSE_RULES = "docs/_house-rules.md";
@@ -25,35 +29,16 @@ export const HEADS_FROM = "2026-10-28T20:30:00Z";
 export const NO_TABLE = 'No "## Security-domain paths" table in docs/_house-rules.md: no piece is held for a Security verdict';
 const SECURITY_ROLES = new Set(["harteburn:security", LEGACY.rolePrefix + "security"]);
 export const isSecurity = (role) => SECURITY_ROLES.has(role);
-const PROVER_ROLES = new Set([LEGACY.rolePrefix + "prover", "harteburn:prover"]);
 
 /**
  * The Prover's dispatch prompt (rc-security piece 4, PRD-RC-SECURITY-4 A1): the commit it judged and
- * every changed file's sha256, in the prompt itself as securityPrompt does, so the push gate can match
- * a proven run to the pushed commit's files. files: [[path, sha256 of its bytes, or null when removed]];
+ * every changed file's sha256, in the prompt itself as securityPrompt does, so the run names exactly
+ * what it judged. files: [[path, sha256 of its bytes, or null when removed]];
  * swarm: { steps: [a, b], of: N } for one member of a reading swarm; brief: the brief it follows.
  */
-export const PROVER_FILES_HEAD = "Changed files and their sha256 (the push gate compares them at the pushed commit):";
+const PROVER_FILES_HEAD = "Changed files and their sha256 at the head commit:";
 export const proverPrompt = (base, head, files = [], swarm = null, brief = "") =>
   `${brief ? `Read ${brief} and follow it. ` : ""}Mode: after. --base ${base} --head ${head}${swarm ? ` --steps ${swarm.steps[0]}-${swarm.steps[1]} of ${swarm.of}` : ""}\n\n${PROVER_FILES_HEAD}${files.map(([p, s]) => `\n- ${JSON.stringify(p)} ${s ?? "removed"}`).join("")}`;
-/** A Prover prompt read back, or null unless it is exactly what proverPrompt writes. */
-export function parseProverPrompt(prompt) {
-  const m = /^(?:Read (\S+) and follow it\. )?Mode: after\. --base ([0-9a-f]{40}(?:[0-9a-f]{24})?) --head ([0-9a-f]{40}(?:[0-9a-f]{24})?)(?: --steps (\d+)-(\d+) of (\d+))?\n\n/.exec(String(prompt));
-  if (!m) return null;
-  const rest = prompt.slice(m[0].length);
-  if (!rest.startsWith(PROVER_FILES_HEAD)) return null;
-  const files = [];
-  for (const l of rest.slice(PROVER_FILES_HEAD.length).split("\n").slice(1)) {
-    const x = /^- ("(?:[^"\\]|\\.)*") ([0-9a-f]{64}|removed)$/.exec(l);
-    if (!x) return null;
-    try { files.push([JSON.parse(x[1]), x[2] === "removed" ? null : x[2]]); } catch { return null; }
-  }
-  const swarm = m[4] ? { steps: [Number(m[4]), Number(m[5])], of: Number(m[6]) } : null;
-  const out = { brief: m[1] || "", base: m[2], head: m[3], files, swarm };
-  return proverPrompt(out.base, out.head, files, swarm, out.brief) === prompt ? out : null;
-}
-/** A Prover verdict's word, from its first line: proven, gaps to pin counts as proven. */
-const proverWord = (first) => /^proven\b/i.test(first) ? "proven" : /^defect\b/i.test(first) ? "defect" : "";
 
 /**
  * The one prompt a Security verdict is counted from, with only the two commits filled in. A real run
@@ -369,22 +354,17 @@ export function hooksDir(root, common) {
 // Answers git cannot take back are kept for the process: an existing commit, and an existing commit's
 // ancestors, listed once (git rev-list) and then looked up. The gate asked merge-base of every verdict
 // against every pushed commit: 5,107 lookups and 1,940 distinct ancestor questions, 90 s of pre-push on
-// merge-hb, 2026-11-03. A failure (a commit not in this repo) holds only until askAfresh(), which each
-// gate check calls first: no commit appears during one check, but a test may make one between checks.
+// merge-hb, 2026-11-03. A failure (a commit not in this repo) is never kept: a commit may appear later.
 const FULL = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const known = new Map();
-const failed = new Set();
-export const askAfresh = () => failed.clear();
 const lineage = (root, b) => {
   const k = `l\0${root}\0${b}`;
   if (known.has(k)) return known.get(k);
-  if (failed.has(k)) return null;
   try {
     const set = new Set(git(root, ["rev-list", "--end-of-options", b]).split("\n").filter(Boolean));
     known.set(k, set);
     return set;
   } catch {
-    failed.add(k);
     return null;
   }
 };
@@ -425,7 +405,7 @@ export function tableGlobs(root) {
 
 /** The table as committed at `sha`, or null: a piece is held to the table it started under too, so
  * removing a row in the same piece never frees that path (Security's sixth verdict on piece 3). */
-export function tableGlobsAt(root, sha) {
+function tableGlobsAt(root, sha) {
   try {
     const id = exactCommit(root, sha);
     if (!id) return null;
@@ -509,7 +489,7 @@ function changedIn(root, from, to, res) {
  * has none, and the start is the head). end = the start of the first piece that started after it
  * ended, or none while it is the latest (then HEAD and the working tree); a reopen only widens it.
  */
-export function pieceStart(root, st) {
+function pieceStart(root, st) {
   const head = exactCommit(root, st.head);
   if (!head) throw new Error("head is not a commit");
   if (!st.from_head) return head;
@@ -643,7 +623,9 @@ function ownBackgroundNotice(a, calls, tasks) {
   if (a?.type !== "queued_command" || a.commandMode !== "task-notification" || a.origin?.kind !== "task-notification") return false;
   const m = /^<task-notification>\n<task-id>([a-z0-9]+)<\/task-id>\n<tool-use-id>([A-Za-z0-9_]+)<\/tool-use-id>\n<output-file>([^<\n]+)<\/output-file>\n<status>([a-z]+)<\/status>\n<summary>Background command "([^\n]*)" ([^<\n]+)<\/summary>\n<\/task-notification>$/.exec(String(a.prompt ?? ""));
   if (!m) return false;
-  const [, task, tool, file, status, desc, ending] = m;
+  const [, task, tool, file, status, said, ending] = m;
+  // Claude Code writes the summary HTML-escaped (production 2026-11-04: `>` as `&gt;`, `&` as `&amp;`).
+  const desc = said.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
   const t = tasks.get(tool);
   if (!t || t.task !== task || t.file !== file || desc !== calls.get(tool) || !Object.hasOwn(BG_ENDINGS, status) || !BG_ENDINGS[status].test(ending)) return false;
   tasks.delete(tool);
@@ -684,12 +666,16 @@ function transcriptFacts(path) {
     }
     const c = o?.message?.content;
     if (o?.message?.role === "assistant" && Array.isArray(c)) {
-      for (const b of c) if (b?.type === "tool_use" && b.name === "Bash" && typeof b.id === "string") calls.set(b.id, String(b.input?.description || b.input?.command || ""));
+      // The first copy of a call is the run's own: Claude Code's api-request-blob copy can rewrite its command
+      // ("cd <repo> && " put first), which the notice never repeats (Security r3 on piece 14, Prover on 4498be5).
+      for (const b of c) if (b?.type === "tool_use" && b.name === "Bash" && typeof b.id === "string" && !calls.has(b.id)) calls.set(b.id, String(b.input?.description || b.input?.command || ""));
     }
     if (o?.message?.role !== "user") continue;
     if (Array.isArray(c)) for (const b of c) {
       if (b?.type !== "tool_result" || !calls.has(b.tool_use_id) || typeof b.content !== "string") continue;
-      const id = /^Command (?:did not complete within its \d+s timeout and was moved to the background \(ID: ([a-z0-9]+)\)|running in background with ID: ([a-z0-9]+)|was moved to the background \(ID: ([a-z0-9]+)\) after running for \d+s)\. Output is being written to: (\S+)\.(?:\s|$)/.exec(b.content);
+      // The command's own output can come first; Claude Code adds its announcement last, on a line of its own
+      // (production 2026-11-04: a Prover's test output, then "Command was moved…"), so the last one counts.
+      const id = [...b.content.matchAll(/(?:^|\n)Command (?:did not complete within its \d+s timeout and was moved to the background \(ID: ([a-z0-9]+)\)|running in background with ID: ([a-z0-9]+)|was moved to the background \(ID: ([a-z0-9]+)\) after running for \d+s)\. Output is being written to: (\S+)\.(?:\s|$)/g)].at(-1);
       if (id) tasks.set(b.tool_use_id, { task: id[1] || id[2] || id[3], file: id[4] });
     }
     if (prompt == null) {
@@ -705,9 +691,34 @@ function transcriptFacts(path) {
  * transcript is under the projects dir, its meta names harteburn:security and the dispatch id, and
  * its first user message hashes to the dispatch row's prompt_sha256 and names --base and --head.
  */
-export function verdicts(root, id, ledger, { env = process.env, role = "security" } = {}) {
-  const prover = role === "prover";
-  const is = prover ? (r) => PROVER_ROLES.has(r) : isSecurity;
+/** Runs ending after this read a holds that lists a medium-or-worse finding as does not hold; earlier
+ * ones are read as they were judged. */
+export const SEVERE_FROM = "2026-11-06T01:00:00Z";
+// A finding labelled with its severity at the start of its line, in the shapes real Security replies use
+// (the 32 harteburn:security replies to 2026-11-06, pinned by shape in tests/rc-security-13-gate-removal.test.mjs
+// SEVERE_SHAPES and CLEAR_SHAPES: "**F1 (medium): ...**", "F1 (medium). ...",
+// "Finding 1, medium: ...", "F3 (medium), step 3", "F1-r2 (medium)", "F2 [high] ...", "critical: ..."), with
+// bold, a bullet, a checkbox, a list number, a heading mark or a table cell before it, or "Severity: high"
+// anywhere; prose that says "not high:" is no label. A re-check says fixed right after the label ("F1
+// (medium): fixed ..."); "not fixed" further on, or "fixed? no", is still open.
+const SEV = "(?:critical|high|medium)";
+const ID = "(?:finding\\s*)?(?:[A-Za-z]{1,4}[\\s-]?)?\\d+(?:[.-]\\w+)*";
+const LABEL = new RegExp(`^(?:${ID})?\\s*[.:,|\\-–—]?\\s*(?:[(\\[]\\s*${SEV}\\b[^)\\]]*[)\\]]|${SEV}\\s*[:,.|])`, "i");
+const SEVERITY_FIELD = new RegExp(`\\bseverity\\s*[:=]\\s*${SEV}\\b`, "i");
+const RECHECK = /^\s*[:\-–—.,]?\s*(?:is\s+|now\s+)?(?:fixed|closed|resolved)\b(?!\s*\?)/i;
+const openSevere = (l) => { const m = LABEL.exec(l); return m ? !RECHECK.test(l.slice(m[0].length)) : SEVERITY_FIELD.test(l); };
+const bare = (l) => l.replace(/\*\*|__/g, "").trim().replace(/^(?:\|\s*)?(?:[-*•+]\s*)?(?:\[[ xX]\]\s*)?(?:\d+[.)]\s*)?(?:#+\s*)?/, "");
+/** The first open medium, high or critical finding a reply lists, or "". On the verdict line, only what
+ * follows the word ("holds, but F1 (medium): x"). */
+export const severeFinding = (reply) => {
+  const [first = "", ...rest] = String(reply).split("\n");
+  const lead = bare(first).replace(/^(?:holds|does not hold)\b\s*[:.,;\-–—]?\s*(?:but\s+)?/i, "");
+  return [lead, ...rest.map(bare)].find(openSevere) || "";
+};
+/** The same, for a run that ended at `end`: "" for one judged before the rule. */
+export const severeSince = (reply, end) => (String(end) > SEVERE_FROM ? severeFinding(reply) : "");
+export function verdicts(root, id, ledger, { env = process.env } = {}) {
+  const is = isSecurity;
   const dispatches = new Map();
   for (const row of ledger || []) if (row?.event == null) dispatches.set(ledgerId(row), row);
   const projects = projectsDir(env);
@@ -722,21 +733,19 @@ export function verdicts(root, id, ledger, { env = process.env, role = "security
       if (!is(meta.agentType) || meta.toolUseId !== stop.dispatch) continue;
       const { prompt, steered, end } = transcriptFacts(tp);
       if (prompt == null || steered || !end || createHash("sha256").update(prompt).digest("hex") !== d.prompt_sha256) continue;
-      if (prover) {
-        const p = parseProverPrompt(prompt);
-        const first = String(finalReply(tp) || "").split("\n")[0].trim();
-        const word = proverWord(first);
-        if (p && word) out.push({ id: stop.dispatch, ts: end, ...p, word, first });
-        continue;
-      }
       // Full commit ids only: git reads a short one as a tag or branch of that name first, so a ref
       // could move a run off its piece (Prover round 3 on 60e07f9).
       const base = /--base\s+([0-9a-f]{40}(?:[0-9a-f]{24})?)\b/.exec(prompt)?.[1];
       const head = /--head\s+([0-9a-f]{40}(?:[0-9a-f]{24})?)\b/.exec(prompt)?.[1];
-      const first = String(finalReply(tp) || "").split("\n")[0].trim();
-      const word = /^does not hold\b/i.test(first) ? "does not hold" : /^holds\b/i.test(first) ? "holds" : "";
+      const reply = String(finalReply(tp) || "");
+      let first = reply.split("\n")[0].trim();
+      let word = /^does not hold\b/i.test(first) ? "does not hold" : /^holds\b/i.test(first) ? "holds" : "";
       const local = promptLocal(prompt), refused = promptRefused(prompt);
       if (!base || !head || !word || !local || !refused || prompt !== securityPrompt(base, head, local, refused)) continue;
+      // A holds that lists a medium, high or critical finding is a needed fix: it refuses on that finding
+      // (jg 2026-11-05, Frame of piece 13). A low under a holds still holds.
+      const severe = word === "holds" && severeSince(reply, end);
+      if (severe) { word = "does not hold"; first = `does not hold: ${severe}`; }
       out.push({ id: stop.dispatch, ts: end, base, head, word, first, local: JSON.stringify(local), named: refused });
     } catch {}
   }
@@ -819,26 +828,71 @@ export function namedAccounts(root, id, ledger, { env = process.env, since = "" 
   return out;
 }
 
-export function acceptances(root, id, ledger, { env = process.env } = {}) {
+export function acceptances(root, id, ledger, { env = process.env, rows = false, all = false } = {}) {
+  // `rows`: the board's accept rows as stored, for a stamp's own re-check of what it pointed at; they
+  // clear nothing by themselves. This is the one reader of accept rows (PRD-RC-SECURITY-14 step 7).
+  if (rows) return (ledger || []).filter((row) => row?.event === "accept" && (id == null || row.board === id));
   const projects = projectsDir(env);
   const out = [];
-  const said = new Map();
+  const said = new Map(), parsed = new Map();
   for (const row of ledger || []) {
-    if (row?.event !== "accept" || row.board !== id || !row.text || !Number.isInteger(row.piece) || !inside(projects, String(row.transcript || ""))) continue;
+    if (row?.event !== "accept" || row.board !== id || !Number.isInteger(row.piece) || !inside(projects, String(row.transcript || ""))) continue;
     try {
+      if (row.via === "dialog") {
+        // The click, read as Claude Code wrote it: the question from the ask's own input, the finding
+        // parsed from it, never a field of the row.
+        const q = askedQuestion(row, parsed);
+        const m = q != null && ACCEPT_FORM.exec(q);
+        if (!m || m[1] !== id || Number(m[2]) !== row.piece) continue;
+        const form = { question: q, header: ACCEPT_HEADER, options: ACCEPT_OPTIONS, descriptions: ACCEPT_DESCRIPTIONS };
+        const c = clicked(root, row, form, env, parsed);
+        if (c) out.push({ id: row.id, ts: c.ts, piece: row.piece, text: m[3], word: c.word, via: "dialog" });
+        continue;
+      }
+      if (!row.text) continue;
       typedLines(root, row.transcript, said);
       const re = new RegExp(`^\\s*accept\\s+piece\\s+${row.piece}\\s*:\\s*${row.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
-      const typed = said.get(row.transcript).filter((t) => re.test(t.text)).map((t) => t.ts).sort().pop();
-      if (typed) out.push({ id: row.id, ts: typed, piece: row.piece, text: row.text });
+      // The latest matching line typed before the cutoff counts; a later copy of the same line never hides
+      // it (Prover on 999cbc4). Only when every copy is late is the row late, for the refusal's note.
+      const times = said.get(row.transcript).filter((t) => re.test(t.text)).map((t) => String(t.ts)).sort();
+      const inTime = times.filter((t) => t < TYPED_UNTIL).pop();
+      const typed = inTime || times.pop();
+      if (typed) out.push({ id: row.id, ts: typed, piece: row.piece, text: row.text, word: "Accept", ...(!inTime && { late: true }) });
     } catch {}
   }
-  return out.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+  out.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+  if (all) return out;
+  // The owner's latest click on a finding stands: a Fix it first after an Accept takes it back.
+  const latest = new Map();
+  for (const a of out) if (a.via === "dialog") latest.set(`${a.piece}\0${folded(a.text)}`, a);
+  return out.filter((a) => !a.late && (a.via !== "dialog" ? true : latest.get(`${a.piece}\0${folded(a.text)}`) === a && a.word === "Accept"));
+}
+
+/** The question an ask asked, from the transcript the row points at (the ask's own input), or null. */
+function askedQuestion(row, parsed) {
+  const use = askOf(transcriptLines(String(row.transcript || ""), parsed), row.tool_use_id)?.use;
+  const qs = use?.input?.questions;
+  return Array.isArray(qs) && qs.length === 1 && typeof qs[0]?.question === "string" ? qs[0].question : null;
 }
 
 /** An acceptance answers a finding when it quotes the whole finding (whitespace and case aside), typed
  * after the verdict: part of a two-finding line never accepts the other (Security round 20). */
 const folded = (s) => String(s).replace(/\s+/g, " ").trim().toLowerCase();
 export const answers = (a, v, finding) => folded(a.text) === folded(finding) && String(a.ts) >= String(v.ts);
+
+/**
+ * What the owner already answered on finding `f` of piece `n`, said in the refusal so their answer is
+ * seen: their latest click was Fix it first, or a typed accept came after TYPED_UNTIL and no longer counts.
+ */
+function acceptNotes(root, id, ledger, n, f, v, env) {
+  const mine = acceptances(root, id, ledger, { env, all: true }).filter((a) => a.piece === n && answers(a, v, f));
+  const click = mine.filter((a) => a.via === "dialog").pop();
+  const late = mine.filter((a) => a.late).pop();
+  return [
+    click && click.word !== "Accept" ? `\nthe owner chose ${click.word} ${when(click.ts)}.` : "",
+    late ? `\nyour typed accept of ${String(late.ts).slice(0, 10)} no longer counts; answer the question above.` : "",
+  ].join("");
+}
 
 /**
  * The security check for each done piece of a record held to the rules. Changes `stamps` in place
@@ -1003,20 +1057,64 @@ export function securityCheck(root, rec, stamps, ledger, { env = process.env, lo
         ? (!exactCommit(root, d.base) || d.base === start) && !narrowedRun(d, ledger, env)
         : canon.has(d.prompt_sha256) || plain.has(d.plain_sha256);
       const known = witnessed ? new Set([st.security.dispatch, ...(st.security.known || [])]) : new Set();
-      const lost = hit.length && (ledger || []).find((d) => d?.event == null && isSecurity(d.role) && d.board === rec.id && ours(d) && !known.has(ledgerId(d)) && !all.some((x) => x.id === ledgerId(d)));
+      const lostAll = hit.length ? (ledger || []).filter((d) => d?.event == null && isSecurity(d.role) && d.board === rec.id && ours(d) && !known.has(ledgerId(d)) && !all.some((x) => x.id === ledgerId(d))) : [];
+      // One run per piece that the builder stopped (Claude Code's killed notice) clears with the owner's
+      // Unlock click, made after a covering holds ended after the stop: the question tells the owner that
+      // holds exists, so a click before it vouches for nothing (PRD-RC-SECURITY-11, jg 2026-11-04;
+      // automated review of 9067d3a). Never one whose own transcript is gone or shows a finding taking
+      // shape: the owner never sees what a stopped run wrote (Security F1 on 9067d3a).
+      // A second lost run keeps the piece refused: stopping runs until one holds never pays. The cleared
+      // run stays in lostAll for good (never `known`), so a second one counts as second after /done too
+      // (Prover 4-6 on 9067d3a); its stored record stands alone only past a witnessed close.
+      const notices = lostAll.map((d) => killedAt(d, env)), kills = notices.map((k) => k.ts || "");
+      const only = lostAll.length === 1 ? lostAll[0] : null;
+      const killed = only ? kills[0] : "";
+      const wrote = killed ? stoppedRunWrote(only, notices[0].dir) : null;
+      const answer = killed && !wrote?.problem ? unlockedBy(root, rec, p.n, ledgerId(only), ledger, env) : {};
+      const unlocked = answer.unlocked || "";
+      // killed < holds' end < unlocked: the click follows both.
+      const live = unlocked && covering.some((h) => h.word === "holds" && h.ts > killed && h.ts < unlocked)
+        ? { run: ledgerId(only), killed, unlocked } : null;
+      // The stored copy stands only past a witnessed close, and only while it agrees with what of
+      // Claude Code's record is left: a notice still there must be the stored one, and a stopped run's
+      // transcript still there must be clean (automated review of 316a6cc).
+      const kept = witnessed && only && st.security.stopped?.run === ledgerId(only) && (!killed || (killed === st.security.stopped.killed && !wrote?.problem)) ? st.security.stopped : null;
+      const stopped = live || kept;
+      // Named: the run that is not the one already unlocked (Prover 4-6 on 9067d3a).
+      const cleared = st.security?.stopped?.run;
+      const lost = !stopped && (lostAll.find((d, i) => !kills[i] && ledgerId(d) !== cleared) || lostAll.find((d) => ledgerId(d) !== cleared) || lostAll[0]);
       // The one prompt to dispatch, as both "no verdict" sentences print it (Architect ruling on the
       // first dispel of step 14): "re-run Security" alone leads to a narrowed run, which never counts.
       const dispatchIt = `commit, then dispatch harteburn:security with exactly the prompt \`node <plugin>/scripts/board-security.mjs --prompt ${start.slice(0, 12)} ${end ? end.slice(0, 12) : "HEAD"}${delta.length ? ` ${rec.id} ${p.n}` : ""}\` prints; a ledger row typed by hand, or a narrowed prompt, does not count`;
       if (lost) {
         delete st.security;
-        res.problems.push(`${at} changes security-domain paths (${listed(hit)}) with no Security verdict on them: a Security run on its code (${ledgerId(lost)}) cannot be read (it has not returned, or its transcript is missing or changed); wait for it, or ${dispatchIt}`);
+        const head = `${at} changes security-domain paths (${listed(hit)}) with no Security verdict on them: `;
+        const idx = lostAll.indexOf(lost);
+        if (lostAll.length > 1 && kills.every(Boolean)) {
+          res.problems.push(`${head}${lostAll.length} Security reviews on its code were stopped by the builder (${lostAll.map(ledgerId).join(", ")}); the owner's Unlock clears one per piece, so this piece stays refused: move the work to a new piece`);
+        } else if (!kills[idx]) {
+          res.problems.push(`${head}a Security run on its code (${ledgerId(lost)}) cannot be read (it has not returned, or its transcript is missing or changed); wait for it, or ${dispatchIt}`);
+        } else if (wrote?.problem) {
+          res.problems.push(`${head}Security review ${ledgerId(lost)} on its code was stopped by the builder before its verdict (Claude Code's record), and ${wrote.problem}, so no Unlock clears it: fix what it found, then ${dispatchIt}`);
+        } else {
+          const q = unlockQuestion(p.n, ledgerId(lost), rec.id);
+          const opts = UNLOCK_OPTIONS.map((l, i) => `${l} ("${UNLOCK_DESCRIPTIONS[i]}")`).join(" and ");
+          res.problems.push(`${head}Security review ${ledgerId(lost)} on its code was stopped by the builder before its verdict (Claude Code's record), so it will never return; ${dispatchIt}, and once that review says "holds", ask the owner with AskUserQuestion exactly "${q}", header "${UNLOCK_HEADER}", options ${opts}, with no other text (one stopped review per piece; an answer an agent fills in never counts)${answer.kept ? `; the owner chose Keep locked ${when(answer.kept)}` : ""}`);
+        }
         continue;
       }
+      const shown = (text) => (res.shown[p.n] = stopped ? `${text} · security: review ${stopped.run} stopped by the builder ${when(stopped.killed)}; owner unlocked ${when(stopped.unlocked)}` : text);
+      // Stored with the pass, so a witnessed close keeps both the line and the one-per-piece count.
+      const keep = (s) => { if (stopped) s.stopped = { run: stopped.run, killed: stopped.killed, unlocked: stopped.unlocked }; else delete s.stopped; };
       const refusal = open().find((x) => x.word === "does not hold" && !accepted(x));
       if (refusal) {
         delete st.security;
         const f = finding(refusal);
-        res.problems.push(`${at}'s Security verdict is "does not hold" (${refusal.first}): fix it, commit, then dispatch harteburn:security with exactly the prompt \`node <plugin>/scripts/board-security.mjs --prompt ${start.slice(0, 12)} ${end ? end.slice(0, 12) : "HEAD"} ${rec.id} ${p.n}\` prints (it names the open refusals); or the owner accepts the risk by sending, alone in one message, "accept piece ${p.n}: ${f || "<the finding>"}" (an agent's words never count)`);
+        const fix = `Fix it, commit, then dispatch harteburn:security with exactly the prompt \`node <plugin>/scripts/board-security.mjs --prompt ${start.slice(0, 12)} ${end ? end.slice(0, 12) : "HEAD"} ${rec.id} ${p.n}\` prints (it names the open refusals)`;
+        // The owner accepts by a click, never a typed line (PRD-RC-SECURITY-14); a verdict that names
+        // no finding can only be fixed. Every text of the question is the board's.
+        const ask = !f ? "." : `; or ask the owner this question (AskUserQuestion), with no other text:\nquestion: ${acceptQuestion(p.n, rec.id, f)}\nheader: ${ACCEPT_HEADER}\noptions: ${ACCEPT_OPTIONS.join(" / ")}\ndescriptions: ${ACCEPT_DESCRIPTIONS.map((d) => `"${d}"`).join(" / ")}${acceptNotes(root, rec.id, ledger, p.n, f, refusal, env)}`;
+        res.problems.push(`${at}'s Security verdict is "does not hold":\n${f || refusal.first}\n${fix}${ask}`);
         continue;
       }
       // What the board saw stays, until a table path changes after the verdict's head. It counts only
@@ -1030,7 +1128,8 @@ export function securityCheck(root, rec, stamps, ledger, { env = process.env, lo
           // The canonical runs the board could read when it witnessed the close.
           st.security.known = (ledger || []).filter((d) => d?.event == null && isSecurity(d.role) && d.board === rec.id && ours(d) && all.some((x) => x.id === ledgerId(d))).map(ledgerId);
         }
-        res.shown[p.n] = shownText(st.security);
+        keep(st.security);
+        shown(shownText(st.security));
         continue;
       }
       delete st.security;
@@ -1049,8 +1148,9 @@ export function securityCheck(root, rec, stamps, ledger, { env = process.env, lo
         seen.accept = a.id;
         seen.risk_accepted = `${String(a.ts).slice(0, 10)}: ${a.text}`;
       }
+      keep(seen);
       st.security = seen;
-      res.shown[p.n] = shownText(seen);
+      shown(shownText(seen));
     } catch {
       res.problems.push(`${at}: the board could not read its diff (git failed): it stays refused until it can`);
     }
@@ -1077,6 +1177,193 @@ function narrowedRun(d, ledger, env) {
   }
 }
 
+const when = (ts) => `${String(ts).slice(0, 16).replace("T", " ")} UTC`;
+
+/**
+ * When Claude Code recorded that dispatch `d` was stopped, and which session folder holds it: in its own
+ * session's main transcript (under the projects dir), the task-notification naming the row's agent and
+ * tool-use id with status killed, in either form Claude Code writes (a queued_command attachment, or a
+ * user line marked origin task-notification; production 13252ea4, read 2026-11-04, Prover 1-3 on
+ * 9067d3a). { ts, dir }, or {} (also when two project folders hold the session: never a first match).
+ */
+const KILLED = /^<task-notification>\n<task-id>([a-z0-9]+)<\/task-id>\n<tool-use-id>([A-Za-z0-9_]+)<\/tool-use-id>\n(?:<output-file>[^<\n]+<\/output-file>\n)?<status>([a-z]+)<\/status>\n/;
+function killedAt(d, env) {
+  const id = ledgerId(d), agent = String(d.agent_id || ""), session = String(d.session || "");
+  if (!/^[A-Za-z0-9-]+$/.test(session) || !/^[a-z0-9]+$/.test(agent)) return {};
+  const projects = projectsDir(env);
+  let dirs = [];
+  try { dirs = readdirSync(projects); } catch { return {}; }
+  const homes = dirs.filter((p) => inside(projects, join(projects, p, `${session}.jsonl`)));
+  if (homes.length !== 1) return {};
+  const dir = join(projects, homes[0]);
+  try {
+    for (const l of readFileSync(join(dir, `${session}.jsonl`), "utf8").split("\n")) {
+      if (!l.includes(id) || !l.includes("task-notification")) continue;
+      try {
+        const o = JSON.parse(l), a = o.attachment;
+        if (o.isSidechain !== false) continue;
+        let body = null, ts = "";
+        if (a?.type === "queued_command" && a.commandMode === "task-notification" && a.origin?.kind === "task-notification") [body, ts] = [a.prompt, a.timestamp || o.timestamp];
+        else if (o.type === "user" && o.origin?.kind === "task-notification" && o.origin?.producer === "session-task" && typeof o.message?.content === "string") {
+          const c = o.message.content;
+          [body, ts] = [c.startsWith(NOTICE_PREAMBLE) ? c.slice(NOTICE_PREAMBLE.length) : c, o.timestamp];
+        }
+        const m = KILLED.exec(String(body ?? ""));
+        if (m && m[1] === agent && m[2] === id && m[3] === "killed" && ts) return { ts: String(ts), dir };
+      } catch {}
+    }
+  } catch {}
+  return {};
+}
+
+/** A transcript's lines, parsed once per render (`parsed`, keyed by path). */
+function transcriptLines(tp, parsed) {
+  if (!parsed.has(tp)) parsed.set(tp, readFileSync(tp, "utf8").split("\n").map((l) => { try { return JSON.parse(l); } catch { return null; } }));
+  return parsed.get(tp);
+}
+const askOf = (lines, id) => {
+  const useOf = (o) => (Array.isArray(o?.message?.content) ? o.message.content : []).find((b) => b?.type === "tool_use" && b.id === id);
+  const ask = id && lines.find((o) => o?.type === "assistant" && useOf(o));
+  return ask ? { ask, use: useOf(ask) } : null;
+};
+
+/**
+ * The owner's click on the fixed-form question `form` ({ question, header, options, descriptions }) that
+ * a hook row points at: { ts, word } or null (PRD-RC-SECURITY-11, shared by PRD-RC-SECURITY-14). The row
+ * only points at a main transcript under the projects dir; the click counts only as Claude Code wrote it
+ * there: the AskUserQuestion call asks exactly that one question, under that header, with exactly those
+ * options and descriptions, and nothing filled in, and its result (by sourceToolAssistantUUID, in this
+ * repo) is a person's answer (permissionDecision user_temporary).
+ */
+function clicked(root, row, form, env, parsed = new Map()) {
+  const projects = projectsDir(env);
+  const tp = String(row?.transcript || "");
+  if (!row?.tool_use_id || !inside(projects, tp) || relative(projects, tp).split(/[\\/]/).includes("subagents")) return null;
+  const want = JSON.stringify(form.options.map((label, i) => ({ label, description: form.descriptions[i] })));
+  try {
+    const lines = transcriptLines(tp, parsed);
+    const { ask, use } = askOf(lines, row.tool_use_id) || {};
+    const qs = use?.input?.questions;
+    if (!ask || ask.isSidechain !== false || use.name !== "AskUserQuestion" || Object.keys(use.input).join() !== "questions") return null;
+    if (!Array.isArray(qs) || qs.length !== 1 || qs[0]?.question !== form.question || qs[0].header !== form.header || qs[0].multiSelect === true) return null;
+    // Each option exactly { label, description }, in this order: no text of the builder's beside them.
+    if (JSON.stringify((qs[0].options || []).map((o) => (Object.keys(o || {}).sort().join() === "description,label" ? { label: o.label, description: o.description } : o))) !== want) return null;
+    const res = lines.find((o) => o?.type === "user" && o.sourceToolAssistantUUID === ask.uuid && (Array.isArray(o.message?.content) ? o.message.content : []).some((b) => b?.type === "tool_result" && b.tool_use_id === row.tool_use_id));
+    const ans = res?.toolUseResult?.answers;
+    if (!res || res.isSidechain !== false || !within(root, String(res.cwd || "")) || res.permissionDecision?.source !== "user_temporary") return null;
+    if (!ans || Object.keys(ans).length !== 1 || !form.options.includes(ans[form.question])) return null;
+    return { ts: String(res.timestamp || ""), word: ans[form.question] };
+  } catch {
+    return null;
+  }
+}
+
+/** The owner's answer to unlockQuestion(n, run, board): { unlocked } or { kept }, the time of their latest answer, or {}. */
+function unlockedBy(root, rec, n, run, ledger, env) {
+  const form = { question: unlockQuestion(n, run, rec.id), header: UNLOCK_HEADER, options: UNLOCK_OPTIONS, descriptions: UNLOCK_DESCRIPTIONS };
+  const parsed = new Map();
+  let latest = null;
+  for (const row of ledger || []) {
+    if (row?.event !== "unlock" || row.board !== rec.id || row.piece !== n || row.run !== run) continue;
+    const c = clicked(root, row, form, env, parsed);
+    // The owner's latest answer stands: a Keep locked after an Unlock locks it again.
+    if (c && (!latest || c.ts > latest.ts)) latest = c;
+  }
+  return !latest ? {} : latest.word === "Unlock" ? { unlocked: latest.ts } : { kept: latest.ts };
+}
+
+/**
+ * What a stopped Security run wrote before it was stopped, from its own transcript beside the killed
+ * notice (`dir`/<session>/subagents, its meta naming the dispatch): {} only when it wrote nothing but
+ * reading tool calls (READ_ONLY) and empty thinking. Any prose, any other tool, any Bash command that
+ * reads like a finding, or a missing transcript is { problem }: the owner never sees what a stopped run
+ * wrote, so only one that had said nothing may unlock (Security F1 and the automated review of 316a6cc:
+ * a word list alone fails open).
+ */
+const READ_ONLY = new Set(["Read", "Grep", "Glob", "Bash"]);
+// A Bash call counts as reading only when every command in it is one of these, with no redirection or
+// substitution (automated review of a981c84: Bash alone could write what the run found). The list is
+// the stopped run's own commands in production (agent-acda2f447d00b2ed0, read 2026-11-04).
+// An allowlist, never a list of tricks (automated reviews of a981c84 and a4cb4a5): git takes only these
+// subcommands and flags (no --ext-diff, --textconv, -O, git grep), and anything else fails closed.
+const READ_PROGRAMS = new Set(["cd", "cat", "head", "tail", "ls", "grep", "wc", "shasum", "echo", "sed", "git"]);
+const GIT_READS = new Set(["diff", "log", "show", "status", "rev-parse", "ls-files", "ls-tree", "blame", "cat-file"]);
+const GIT_FLAGS = /^(?:--stat|--oneline|--name-only|--name-status|-n\d+|--)$/;
+// Outside quotes only these characters (no $ { } ? [ < > ( ) \ ` !): nothing bash would expand or redirect.
+const PLAIN = /^[A-Za-z0-9._\/:=,@+^~*%-]$/;
+const GIT_ARG = /^[A-Za-z0-9._\/:^~@-]+$/;
+function readOnlyBash(cmd) {
+  const c = String(cmd ?? "");
+  // Read into commands of words as bash does (automated review of a3302e9: a check on raw text passes
+  // "--ext-diff" quoted, or a brace expansion). Single quotes keep everything; in double quotes a $
+  // fails and \ keeps the next character; an unclosed quote fails.
+  const cmds = [[]];
+  let w = null, q = "";
+  const end = () => { if (w) cmds[cmds.length - 1].push(w); w = null; };
+  for (let i = 0; i < c.length; i++) {
+    const ch = c[i];
+    if (q) {
+      if (ch === q) { q = ""; continue; }
+      if (q === '"' && (ch === "$" || ch === "`")) return false;
+      if (q === '"' && ch === "\\") { w.text += ch + (c[i + 1] ?? ""); i++; continue; }
+      w.text += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') { w ||= { text: "", quoted: false }; w.quoted = true; q = ch; continue; }
+    if (ch === " " || ch === "\t") { end(); continue; }
+    if ("|;&\n".includes(ch)) {
+      end();
+      cmds.push([]);
+      if ((ch === "&" || ch === "|") && c[i + 1] === ch) i++;
+      else if (ch === "&") return false;
+      continue;
+    }
+    if (!PLAIN.test(ch)) return false;
+    w ||= { text: "", quoted: false };
+    w.text += ch;
+  }
+  if (q) return false;
+  end();
+  return cmds.every((ws) => {
+    if (!ws.length) return true;
+    const [prog, ...args] = ws;
+    if (prog.quoted || !READ_PROGRAMS.has(prog.text)) return false;
+    // Only `sed -n <a>[,<b>]p <files>`: any other sed script can write (w, e, -i).
+    if (prog.text === "sed") return args.length >= 2 && args.every((a) => !a.quoted) && args[0].text === "-n" && /^\d+(?:,\d+)?p$/.test(args[1].text) && args.slice(2).every((a) => GIT_ARG.test(a.text) && !a.text.startsWith("-"));
+    // git: listed subcommands and flags, plain words only (no quotes, no globs).
+    if (prog.text === "git") return args.length >= 1 && GIT_READS.has(args[0].text) && args.every((a) => !a.quoted && GIT_ARG.test(a.text) && (!a.text.startsWith("-") || GIT_FLAGS.test(a.text) || a === args[0]));
+    return true;
+  });
+}
+const FINDING_TEXT = /\bdoes not hold\b|\b(?:critical|high|medium|low)\b\s*(?:severity|risk|finding)?\s*[:)\]]/i;
+function stoppedRunWrote(d, dir) {
+  const id = ledgerId(d), agent = String(d.agent_id || ""), session = String(d.session || "");
+  const gone = { problem: "its own transcript is missing, so the board cannot see what it had found" };
+  if (!dir || !/^[A-Za-z0-9-]+$/.test(session) || !/^[a-z0-9]+$/.test(agent)) return gone;
+  const tp = join(dir, session, "subagents", `agent-${agent}.jsonl`);
+  try {
+    const meta = JSON.parse(readFileSync(tp.replace(/\.jsonl$/, ".meta.json"), "utf8"));
+    if (!isSecurity(meta.agentType) || meta.toolUseId !== id) return gone;
+    for (const l of readFileSync(tp, "utf8").split("\n")) {
+      let o;
+      try { o = JSON.parse(l); } catch { continue; }
+      const c = o?.message?.role === "assistant" && Array.isArray(o.message.content) ? o.message.content : [];
+      for (const b of c) {
+        const said = b?.type === "text" ? b.text : b?.type === "thinking" ? b.thinking : b?.type === "tool_use" ? "" : JSON.stringify(b);
+        if (String(said || "").trim()) return { problem: `its transcript already reads "${String(said).replace(/\s+/g, " ").trim().slice(0, 120)}"` };
+        if (b?.type === "tool_use" && !READ_ONLY.has(b.name)) return { problem: `it had already used ${b.name}, which can carry what it found` };
+        if (b?.type === "tool_use" && b.name === "Bash" && !readOnlyBash(b.input?.command)) return { problem: `it had already run a command that is not only reading (${String(b.input?.command ?? "").replace(/\s+/g, " ").slice(0, 80)})` };
+        const cmd = b?.type === "tool_use" ? JSON.stringify(b.input ?? "") : "";
+        const m = FINDING_TEXT.exec(cmd);
+        if (m) return { problem: `its transcript already reads "${cmd.slice(Math.max(0, m.index - 40), m.index + 80)}"` };
+      }
+    }
+    return {};
+  } catch {
+    return gone;
+  }
+}
+
 const listed = (hit) => hit.slice(0, 5).join(", ") + (hit.length > 5 ? ` (+${hit.length - 5} more)` : "");
 
 /** The hashes of this piece's canonical Security prompts: base its start, head any commit since. */
@@ -1090,7 +1377,7 @@ function canonicalHashes(root, start, delta = []) {
 const closedNow = (rec) => ["done", "closed"].includes(rec.status);
 function evidenceOnDisk(seen, ledger) {
   const stop = (ledger || []).find((r) => r?.event === "stop" && r.dispatch === seen.dispatch);
-  const acc = seen.accept && (ledger || []).find((r) => r?.event === "accept" && r.id === seen.accept);
+  const acc = seen.accept && acceptances(null, null, ledger, { rows: true }).find((r) => r.id === seen.accept);
   return existsSync(String(stop?.transcript || "")) && (!seen.accept || existsSync(String(acc?.transcript || "")));
 }
 
@@ -1109,7 +1396,7 @@ function stampHolds(root, rec, seen, ledger, env) {
   const rel = relative(resolve(projectsDir(env)), resolve(tp));
   if (!tp || rel.startsWith("..") || isAbsolute(rel)) return false;
   if (seen.accept) {
-    const acc = (ledger || []).find((r) => r?.event === "accept" && r.id === seen.accept && r.board === id);
+    const acc = acceptances(root, id, ledger, { rows: true }).find((r) => r.id === seen.accept);
     if (!acc) return false;
     if ((open || existsSync(String(acc.transcript || ""))) && !acceptances(root, id, ledger, { env }).some((x) => x.id === seen.accept)) return false;
   } else if (seen.verdict !== "holds") return false;

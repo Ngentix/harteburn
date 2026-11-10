@@ -49,8 +49,8 @@ Start a new session. It opens with HarteBurn's way of working, and, in a repo th
 | 5. Bugs under the convene rule | Built. The checklist's first line names who ran and who was excused, and the ledger records each dispatch. [The checklist](docs/how-the-team-works.md#what-the-owner-sees-the-harteburn-checklist). The first bug run was phase 4's slice; a session that skipped the Architect and a later canary run were each recorded in a retro |
 | 6. A second product | Built. Connector Cloud was first. A second product has its own house rules, a compiled brief, and the brief gate. The steps are [Adding a product](docs/adding-a-product.md). It does not yet have the twenty-question answer key; Connector Cloud's is the one that has been scored |
 | 7. The saved workflow | Built. `/harteburn:prd-panel` is the one command: Product, Architect and Prover in parallel and blind, then the Architecture Lead's one table. [The command](skills/prd-panel/SKILL.md) |
-| 8. The push gate | Built 0.26.0. In a repo with a security-domain table, an agent's push needs a covering Security "holds" and Prover "proven"; git's own pre-push hook checks the same in your terminal. [The push gate](docs/reference.md#the-push-gate) |
-| 9. Team seats | Built 0.26.0, not active yet: no seat verifies until the production signing key ships. On a Team license the board checks each seat's typed `go piece n:` and accept, and the push gate counts only the security owner's accept. [Team seats](docs/roles.md#team-seats) |
+| 8. The push gate | Built 0.26.0, removed 0.27.0 (jg 2026-11-05: it obstructed development far more than it protected). Nothing holds a push; the board still records every verdict, and a new session takes out the pre-push hook it installed. [The push gate](docs/reference.md#the-push-gate) |
+| 9. Team seats | Built 0.26.0, not active yet: no seat verifies until the production signing key ships. On a Team license the board checks each seat's typed `go piece n:` and Accept click. [Team seats](docs/roles.md#team-seats) |
 
 
 Changes: [CHANGELOG](CHANGELOG.md).

@@ -176,17 +176,20 @@ test("a brief within the limit fits three parts wherever its headings fall", () 
   assert.equal(parts.length, 3);
   assert.equal(parts.join(""), body);
   // and at the limit itself, with a heading wherever it would hurt most
-  const atLimit = Array.from({ length: 40 }, (_, i) => `## S${i}\n` + "y".repeat(718)).join("\n").slice(0, MAX_BRIEF_CHARS);
+  const atLimit = Array.from({ length: 60 }, (_, i) => `## S${i}\n` + "y".repeat(718)).join("\n").slice(0, MAX_BRIEF_CHARS);
+  assert.equal(atLimit.length, MAX_BRIEF_CHARS);
   assert.ok(briefParts(atLimit).length <= MAX_PARTS);
 });
 
-test("the limit is what four hook parts hold, less their heads, in whole thousands", () => {
-  assert.equal(MAX_PARTS, 4, "four hook parts (a project's brief outgrew three, 2026-10-30)");
-  // 4 × 9,686 = 38,744: 39,000 would pass the gate and need a fifth part the hook never sends
-  assert.equal(MAX_BRIEF_CHARS, 38000);
+test("the limit fits in what five hook parts hold, less their heads, and needs all five", () => {
+  assert.equal(MAX_PARTS, 5, "five hook parts (a project's brief reached 37,998 of 38,000, jg 2026-11-06)");
+  // 5 × 9,686 = 48,430 the parts hold; jg set 42,000 (2026-11-06), below it, so the gate refuses
+  // any brief that would need a sixth part the hook never sends
+  assert.equal(MAX_BRIEF_CHARS, 42000);
   // a part's room exactly as briefParts computes it: under the cap less 100, with its head
   const room = HOOK_CAP - 101 - briefHead(1, MAX_PARTS).length;
-  assert.equal(MAX_BRIEF_CHARS, Math.floor((MAX_PARTS * room) / 1000) * 1000, `${MAX_PARTS} parts of ${room}`);
+  assert.ok(MAX_BRIEF_CHARS <= MAX_PARTS * room, `${MAX_BRIEF_CHARS} within ${MAX_PARTS} parts of ${room}`);
+  assert.ok(MAX_BRIEF_CHARS > (MAX_PARTS - 1) * room, `a brief at the limit needs all ${MAX_PARTS} parts`);
 });
 
 test("a push is judged by the brief it pushes, never by uncommitted edits in the tree", () => {
@@ -211,7 +214,7 @@ test("a push is judged by the brief it pushes, never by uncommitted edits in the
 
 test("a brief of exactly the limit passes; one character more fails", () => {
   const r = fixture();
-  const brief = (n) => "[B1] [B2]\n" + Array.from({ length: 80 }, (_, i) => `## S${i}\n` + "y".repeat(500)).join("\n").slice(0, n - 10);
+  const brief = (n) => "[B1] [B2]\n" + Array.from({ length: 90 }, (_, i) => `## S${i}\n` + "y".repeat(500)).join("\n").slice(0, n - 10);
   writeFileSync(join(r, "docs/architecture/BRIEF.md"), brief(MAX_BRIEF_CHARS));
   assert.equal(readFileSync(join(r, "docs/architecture/BRIEF.md"), "utf8").length, MAX_BRIEF_CHARS);
   assert.deepEqual(check(r), []);

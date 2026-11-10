@@ -390,7 +390,7 @@ if (mode === "after") {
   const untracked = git(["ls-files", "--others", "--exclude-standard"], root);
   const changed = new Set([...git(["diff", "--name-only", base], root).split("\n"), ...untracked.split("\n")].filter(Boolean));
   // The dispatch prompt names the commits and each changed file's sha256 as it is on disk now (rc-security
-  // piece 4, A1): the push gate counts this run's proven for a pushed commit whose files are the same.
+  // piece 4, A1), so the run names exactly what it judged.
   // A swarm member names its steps; a slice's pass with --steps and no --role judges the whole change.
   const baseSha = git(["rev-parse", "--verify", `${base}^{commit}`], root);
   const files = [...changed].sort().map((p) => {

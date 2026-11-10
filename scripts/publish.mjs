@@ -99,6 +99,45 @@ export function markers(lines) {
 const git = (cwd, args, opts = {}) =>
   execFileSync("git", args, { cwd, encoding: opts.encoding ?? "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 << 20 });
 
+/** Text with its invisible characters taken out (U+200B, U+00AD, U+2060, U+FEFF and the rest of the class), so a
+ *  name split by one is still the name the deny list holds (Security on hb-seats-1, 2026-11-05, low). */
+const visible = (s) => s.replace(/\p{Default_Ignorable_Code_Point}/gu, "");
+/** Text as the deny list matches it: invisible characters out, compatibility forms folded (full-width letters,
+ *  ligatures) and accents dropped, so a name in full-width letters, or with a combining or precomposed accent,
+ *  is still the name on the deny list. Only the
+ *  matching sees this; the published bytes are unchanged. Look-alikes from other scripts (a Cyrillic о) are not
+ *  folded (Security on 3d34caf..689d0d2; Prover on 797ca2b). */
+// NUL too: valid UTF-8 and no default-ignorable, so a name or key with a NUL after each character (UTF-16 style)
+// went out (Security F1 on c0f0ca0..28b4d5e; F4 on 28b4d5e..1a0769b for the key scan, which uses bare()).
+const bare = (s) => visible(s).replace(/\0/g, "");
+/** A key pattern is tried on the text as written, without invisible characters, and without those and NUL: a NUL
+ *  can be the word boundary a pattern ends on, so dropping it alone lost AWS and Google keys (Security F5 on
+ *  1a0769b..330afd6). Each extra form only ever refuses more. */
+const keyIn = (re, s) => re.test(s) || re.test(visible(s)) || re.test(bare(s));
+const folded = (s) => bare(s).normalize("NFKD").replace(/\p{M}/gu, "");
+
+/** The PNG chunks a published image may hold: pixels and how to show them, never text or metadata (tEXt, zTXt,
+ *  iTXt, eXIf, iCCP's named profile, tIME and any other). zTXt is compressed, so the line scan could not see a
+ *  deny term in it; the icon carried its author and a Midjourney Job ID (Security on hb-seats-1, 2026-11-05, low). */
+const PNG_CHUNKS = new Set(["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "sBIT", "bKGD", "pHYs"]);
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+/** Why an image cannot be published, or "". Only a PNG is read; any other image type is refused, since its
+ *  metadata (EXIF, XMP, comments) is not checked. */
+export function imageRefusal(path, body) {
+  if (!/\.(png|jpe?g|gif|ico|webp)$/i.test(path)) return "";
+  if (!/\.png$/i.test(path)) return "only a PNG image is published (its chunks are checked for text and metadata); convert it to PNG";
+  if (body.length < 8 || !body.subarray(0, 8).equals(PNG_SIGNATURE)) return "is not a PNG file";
+  for (let i = 8; i < body.length; ) {
+    if (i + 12 > body.length) return "is not a whole PNG file (a chunk is cut short)";
+    const n = body.readUInt32BE(i), type = body.toString("latin1", i + 4, i + 8);
+    if (i + 12 + n > body.length) return "is not a whole PNG file (a chunk is cut short)";
+    if (!PNG_CHUNKS.has(type)) return `holds a PNG ${type} chunk (text or metadata): strip it before publishing`;
+    i += 12 + n;
+    if (type === "IEND") return i === body.length ? "" : "has bytes after its PNG end";
+  }
+  return "is not a whole PNG file (no end chunk)";
+}
+
 /** The private config, read from HEAD. Fails closed: with no deny list there is no publish. */
 function config(root) {
   let raw;
@@ -117,11 +156,13 @@ function config(root) {
   // became a term like "42" or "[object Object]" that names no customer, so the check ran on nothing (hb-seats-1 piece 1).
   if (!c || typeof c !== "object" || Array.isArray(c)) return { error: "publish.config.json is not a JSON object: write {\"deny\": [<the customer names>]} and commit" };
   if (Array.isArray(c.deny) && c.deny.some((t) => typeof t !== "string")) return { error: "publish.config.json lists a deny term that is not a string: every term must be a customer name in quotes" };
-  // A term names a customer only if it holds a letter or a digit: trim() keeps U+200B, so ["​"] looked like a
-  // list and checked nothing (Prover on 77b1937).
-  const deny = (Array.isArray(c.deny) ? c.deny : []).map((t) => t.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim()).filter((t) => /[\p{L}\p{N}]/u.test(t));
+  // A term names a customer only if it holds a letter or a digit once invisible characters are taken out: trim()
+  // keeps U+200B, so ["​"] looked like a list and checked nothing (Prover on 77b1937; Security low, b0c5896).
+  const deny = (Array.isArray(c.deny) ? c.deny : []).map((t) => folded(t).trim()).filter((t) => /[\p{L}\p{N}]/u.test(t));
   if (!deny.length) return { error: "publish.config.json has no deny terms: list the customer names no public file may hold" };
-  return { deny, allow: (Array.isArray(c.allow) ? c.allow : []).map(String).filter(Boolean) };
+  // An allow that is not a list of strings refuses too: String() made [{}] the glob "[object Object]" (Prover on 797ca2b).
+  if (c.allow !== undefined && (!Array.isArray(c.allow) || c.allow.some((t) => typeof t !== "string"))) return { error: "publish.config.json's allow is not a list of path globs in quotes: fix it and commit" };
+  return { deny, allow: (c.allow || []).filter(Boolean) };
 }
 
 /** The files the public tree would hold, read from HEAD, plus every refusal. */
@@ -143,13 +184,18 @@ export function plan(root) {
       refusals.push(`${e.path}: a ${e.mode === "120000" ? "symlink" : "submodule"} cannot be published (it could carry files from outside the allow-list)`);
       continue;
     }
-    for (const [t, re] of terms) if (re.test(e.path)) refusals.push(`${e.path}: its path names "${t}", a term on the private deny list`);
-    for (const [why, re] of LEAKS) if (re.test(e.path)) refusals.push(`${e.path}: its path holds ${why}`);
+    for (const [t, re] of terms) if (re.test(folded(e.path))) refusals.push(`${e.path}: its path names "${t}", a term on the private deny list`);
+    for (const [why, re] of LEAKS) if (keyIn(re, e.path)) refusals.push(`${e.path}: its path holds ${why}`);
     const body0 = git(root, ["cat-file", "blob", e.sha], { encoding: "buffer" });
     if (!BINARY.test(e.path) && !Buffer.from(body0.toString("utf8"), "utf8").equals(body0)) {
       refusals.push(`${e.path}: is not valid UTF-8 text (a text file is published only when every byte reads; a binary needs a listed extension)`);
       continue;
     }
+    // A font carries name and metadata tables the scan cannot read (WOFF2 is compressed, as zTXt was); none is
+    // published (Security on 3d34caf..689d0d2).
+    if (/\.woff2?$/i.test(e.path)) { refusals.push(`${e.path}: a font is not published (its name and metadata tables are not checked)`); continue; }
+    const image = imageRefusal(e.path, body0);
+    if (image) { refusals.push(`${e.path}: ${image}`); continue; }
     let body = body0;
     // Markdown is published after its private blocks are dropped and its public blocks unwrapped, and
     // scanned after, so a private block may name what the public tree never may.
@@ -161,8 +207,8 @@ export function plan(root) {
       body = Buffer.from(lines.map((l) => l.text).join("\n"), "utf8");
     }
     for (const { text: line, n } of lines) {
-      for (const [t, re] of terms) if (re.test(line)) refusals.push(`${e.path}:${n}: names "${t}", a term on the private deny list`);
-      for (const [why, re] of LEAKS) if (re.test(line)) refusals.push(`${e.path}:${n}: holds ${why}`);
+      for (const [t, re] of terms) if (re.test(folded(line))) refusals.push(`${e.path}:${n}: names "${t}", a term on the private deny list`);
+      for (const [why, re] of LEAKS) if (keyIn(re, line)) refusals.push(`${e.path}:${n}: holds ${why}`);
     }
     files.push({ path: e.path, mode: e.mode, body });
   }
