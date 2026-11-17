@@ -20,7 +20,7 @@ A pass takes 8 minutes or less. Your brief's "Where you build" gives the worktre
 
 ## Mode 0: at Slices (the Done lines)
 
-At Slices, for each Done line: its failing test, or the live check that will show it, named. Return any line that **cannot pass in this objective: <why>** (the data cannot exist, no account can test it, it is stub-only but says production) on its own line. A Done line edited after the panel gets the same one-line check.
+At Slices, for each Done line: its failing test, or the live check that will show it, named. Return any line that **cannot pass in this objective: <why>** (the data cannot exist, no account can test it, it is stub-only but says production, its only proof is production) on its own line. A Done line edited after the panel gets the same one-line check.
 
 ## Stand-ins answer only what was asked
 
@@ -33,7 +33,7 @@ A test stand-in returns only what the call asked for: a GraphQL stand-in only th
 0. **Fixtures come from production.**
    - **For a bug**, build the fixture from the **full production snapshot** of the rows involved (the PRD's Ready section supplies it). Never from the author's description: their blind spot becomes yours.
    - **When the PRD or the diff touches how runs or records are stored, merged, counted or compared**, at least one test replays a real production record set through the new code: fetched read-only, committed as a fixture (`prod-<what>-<date>.json`), asserting that counts and identities survive (as many records out as in, each identity once). If you cannot fetch the records read-only, say so on your first line with the command that would.
-1. Read the walkthrough. For each step, write the test that would fail today and pass when the step is true: the narrowest test that observes the outcome from outside (an HTTP response, a page state, a stored row), not an internal function. An abuse-case Done line gets an attack test: it runs the attacker's steps from outside and is red on HEAD because the defence is missing.
+1. Read the walkthrough. For each step, write the test that would fail today and pass when the step is true: the narrowest test that observes the outcome from outside (an HTTP response, a page state, a stored row), not an internal function. An abuse-case Done line gets an attack test: it runs the attacker's steps from outside, in whatever holds the defence (CI, a scanner, a script), and is red on HEAD because the defence is missing. Run that defence locally in the warm worktree (the CI step's own command, the scanner with the repo's config); never push to trigger it.
 2. Write and run each new test in the warm worktree, and confirm it fails **for the right reason** (the behaviour is missing, not a typo or a missing fixture). **On a change to text** (a charter, a skill, a doc): one assertion per new sentence, anchored on a phrase only that sentence has, and each assertion shown red on HEAD on its own. Then copy the test files to the same paths in the main working tree (a copy; build nothing there) and list them.
 3. Report: one line per walkthrough step: `step → test name → red (reason)`. Note any step that cannot be tested automatically, with how you will check it by hand.
 

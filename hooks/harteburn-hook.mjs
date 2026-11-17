@@ -31,12 +31,13 @@
 import { readFileSync, existsSync, mkdirSync, appendFileSync, renameSync, statSync, lstatSync, openSync, readSync, closeSync, accessSync, writeFileSync, constants, realpathSync, rmSync, utimesSync, statfsSync } from "node:fs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { GIT, gitEnv } from "../scripts/git-safe.mjs";
+import { SAFE_ARGS, protocolResetEnv, GIT_TIMEOUT_MS } from "../scripts/git-safe.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reminderLines } from "../scripts/steward.mjs";
 import { behindNotice } from "../scripts/rules-fetch.mjs";
-import { boardDir, env, isRole, migrate, roleOf, stateDir, STATE_DIR } from "../scripts/paths.mjs";
+import { boardDir, env, homeDir, isRole, migrate, roleOf, stateDir, STATE_DIR } from "../scripts/paths.mjs";
 import { licenseHome, licensePath, readLicense } from "../scripts/login.mjs";
 import { SEAT_PUBLIC_KEY, actorSeats, goLine } from "../scripts/seats.mjs";
 
@@ -98,9 +99,24 @@ export function manualRunRow(args, now = new Date()) {
   };
 }
 
+const resetCache = new Map();
 function git(cwd, args) {
   try {
-    return execFileSync(GIT, ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...args], { cwd, env: gitEnv(process.env), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    // No network, ever: a read-only query in a planted repo (a promisor remote, a missing object) would
+    // otherwise lazily fetch and run that repo's core.sshCommand (Security F5, 2026-11-12). GIT_NO_LAZY_FETCH
+    // is board-security.mjs's guard; SAFE_ARGS (every transport named, since a repo's protocol.<name>.allow
+    // beats protocol.allow) also covers a git older than 2.44.
+    // A repo's own protocol.<custom>.allow goes back to never too (automated review of 6c19ea8); a config
+    // git cannot read, or a git that ignores the reset, throws here and the hook stays silent.
+    // A failed reset is remembered as null, so a repo that stalls git (a FIFO include, Security F2) costs
+    // one timeout, not one per call.
+    if (!resetCache.has(cwd)) {
+      resetCache.set(cwd, null);
+      resetCache.set(cwd, protocolResetEnv(cwd, process.env));
+    }
+    const env = resetCache.get(cwd);
+    if (!env) return "";
+    return execFileSync(GIT, [...SAFE_ARGS, ...args], { cwd, env: { ...gitEnv(env), GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0" }, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: GIT_TIMEOUT_MS }).trim();
   } catch {
     return "";
   }
@@ -227,7 +243,8 @@ function licenseSeats(opts = {}) {
  * when that transcript agrees (scripts/board-security.mjs acceptances).
  */
 /** The owner's "test account <provider>: <account>", one line; board-security.mjs namedAccounts reads it too. */
-export const TEST_ACCOUNT = /^\s*test\s+account\s+(\S+)\s*:\s*(\S+)\s*$/i;
+// The provider may be several words ("Cloudflare R2"; retro 2026-11-15 Change 1), never a colon or a line break.
+export const TEST_ACCOUNT = /^\s*test\s+account\s+([^\s:]+(?:[ \t][^\s:]+)*)[ \t]*:\s*(\S+)\s*$/i;
 export function recordAccepts(input, root) {
   // "accept piece <n>: <the finding>": an acceptance names its piece, so it answers no other
   // (Security's tenth verdict on rc-security piece 3).
@@ -282,6 +299,23 @@ export const acceptQuestion = (piece, board, finding) => `Security found this on
 export const ACCEPT_FORM = /^Security found this on ([A-Za-z0-9._-]+) piece (\d+):\n([^\n\r\u2028\u2029\u0085]+)\nAccept the risk\?$/;
 
 /**
+ * The one question that names a provider's test or sandbox account for a live write (retro 2026-11-15
+ * a customer website's gated-updates, Change 1; jg 2026-11-16): a plain yes by a click, never a retyped
+ * line. Header and options fixed, the header being the yes-option, as Accept's. A typed line still counts.
+ */
+export const ACCOUNT_HEADER = "Test account";
+export const ACCOUNT_OPTIONS = ["Test account", "Not a test account"];
+export const ACCOUNT_DESCRIPTIONS = ["Live writes for this objective may go to this account.", "Live writes stay refused until you name a test or sandbox account."];
+export const accountQuestion = (board, provider, account) => `For ${board}: is "${account}" a test or sandbox account for ${provider}, never a customer's or production account?`;
+// The agent writes both names the owner reads (Security F2 on Change 1), so each is a plain name, never a
+// sentence: the account one ASCII token, as real bucket, project and account ids are (no blank-looking
+// U+3164 or U+2800, curly quote or combining mark: Security F2-r2), the provider a short name of letters,
+// digits, spaces, "." and "-" ("Cloudflare R2").
+export const ACCOUNT_NAME = /^[A-Za-z0-9._:@\/+=-]{1,100}$/;
+export const PROVIDER_NAME = /^(?=.{1,40}$)[A-Za-z0-9](?:[A-Za-z0-9 .-]*[A-Za-z0-9])?$/;
+export const ACCOUNT_FORM = /^For ([A-Za-z0-9._-]+): is "([A-Za-z0-9._:@\/+=-]{1,100})" a test or sandbox account for ((?=[^,]{1,40},)[A-Za-z0-9](?:[A-Za-z0-9 .-]*[A-Za-z0-9])?), never a customer's or production account\?$/u;
+
+/**
  * One ledger row per unlock or accept question in an AskUserQuestion call (PostToolUse), with the
  * session's transcript and the call's id. The row only points: the board counts the click it finds there.
  * The mode keeps its name, `unlock`, though it records both (docs/triage.md).
@@ -290,7 +324,8 @@ export function recordUnlocks(input, root, opts = {}) {
   const qs = Array.isArray(input?.tool_input?.questions) ? input.tool_input.questions : [];
   const asked = qs.map((q) => UNLOCK_FORM.exec(String(q?.question ?? ""))).filter(Boolean);
   const accepts = qs.map((q) => ACCEPT_FORM.exec(String(q?.question ?? ""))).filter(Boolean);
-  if ((!asked.length && !accepts.length) || !root) return;
+  const accounts = qs.map((q) => ACCOUNT_FORM.exec(String(q?.question ?? ""))).filter(Boolean);
+  if ((!asked.length && !accepts.length && !accounts.length) || !root) return;
   let gitDir = git(root, ["rev-parse", "--git-common-dir"]);
   if (!gitDir) return;
   if (!isAbsolute(gitDir)) gitDir = join(root, gitDir);
@@ -303,6 +338,8 @@ export function recordUnlocks(input, root, opts = {}) {
   appendFileSync(join(dir, "ledger.jsonl"), [
     ...asked.map((m) => ({ event: "unlock", id: randomBytes(6).toString("hex"), ...point, piece: Number(m[2]), run: m[1], ...(seats.length && { seats }), ...boardId(root) })),
     ...accepts.map((m) => ({ event: "accept", via: "dialog", id: randomBytes(6).toString("hex"), ...point, piece: Number(m[2]), ...(seats.length && { seats }), ...boardId(root) })),
+    // The board named in the question, not the repo's current one: a row for another board names nothing there.
+    ...accounts.map((m) => ({ event: "account", via: "dialog", id: randomBytes(6).toString("hex"), ...point, board: m[1], provider: m[3], account: m[2] })),
   ].map((r) => JSON.stringify(r)).join("\n") + "\n");
 }
 
@@ -672,6 +709,105 @@ function touch(input, cwd) {
   } catch {}
 }
 
+// ── lag: another repo's clone may be behind its remote (jg 2026-11-12) ──
+// A session answered from another repo's stale clone: 4 commits behind, the accurate page was not on disk.
+// When a tool reads another repo, say so if its copy was not fetched recently, is behind the remote refs it
+// knows, or is off the remote's default branch, so the session fetches (through its own tools) or states the
+// copy's date. The hook NEVER fetches: a fetch runs under the other repo's own git config (sshCommand,
+// uploadpack, credential helpers), which a cloned or downloaded repo controls (Security F1, 2026-11-12).
+
+/** Every path a read-like tool names: Read/Grep/Glob paths, and absolute or `~` paths in a Bash command. */
+export function lagPaths(input) {
+  const ti = (input && input.tool_input) || {};
+  const out = new Set();
+  const add = (p) => {
+    if (typeof p !== "string" || !p) return;
+    if (p === "~" || p.startsWith("~/")) p = join(process.env.HOME || "", p.slice(1));
+    else if (!isAbsolute(p) && input.cwd) p = join(input.cwd, p);
+    if (isAbsolute(p)) out.add(p);
+  };
+  if (input?.tool_name === "Bash") {
+    add(touchedPath(input));
+    for (const m of String(ti.command || "").slice(0, 20000).matchAll(/(?:^|[\s"'=(])((?:~\/|\/)[^\s"';&|()<>]+)/g)) add(m[1]);
+  } else add(ti.file_path || ti.notebook_path || ti.path || "");
+  return [...out].slice(0, 8);
+}
+
+/** Older than this, a copy is reported as not fetched recently. */
+export const LAG_STALE_MS = 6 * 3600e3;
+// Only plain names reach the model's context: a directory or branch name is attacker-shaped text (Security F2).
+const SAFE = /^[A-Za-z0-9._\/@+-]+$/;
+
+/** One plain sentence when `root`'s copy is stale, behind its known remote, or off its default branch; "" otherwise. */
+export function lagNote(root, now = Date.now()) {
+  if (git(root, ["rev-parse", "--is-bare-repository"]) !== "false") return ""; // an embedded bare repo is never a source
+  // Only a normal checkout, whose git dir is <root>/.git: never a git dir planted inside another repo's files
+  // (core.worktree tricks, Security F1/F5), and never a submodule (its detached HEAD is normal; Prover 2026-11-12).
+  const gd = git(root, ["rev-parse", "--absolute-git-dir"]);
+  const realp = (q) => { try { return realpathSync(q); } catch { return q; } };
+  if (!gd || realp(gd) !== realp(join(root, ".git"))) return "";
+  const branch = git(root, ["branch", "--show-current"]);
+  const def = git(root, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+  const up = git(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+  if (!def && !up) return ""; // no remote: nothing to be behind
+  if (![root, branch || "x", def || "x", up || "x"].every((v) => SAFE.test(v))) return "";
+  if ([branch, def, up].some((v) => v.length > 64)) return ""; // names are data, kept short (Security F7)
+  const count = (range) => Number(git(root, ["rev-list", "--count", range]) || 0);
+  const parts = [];
+  // When the remote refs were last written: a fetch writes FETCH_HEAD; a clone writes origin/HEAD. Not
+  // packed-refs: a local `git gc` rewrites it with no fetch (Prover 2026-11-12).
+  let fetched = 0;
+  for (const f of ["FETCH_HEAD", "refs/remotes/origin/HEAD"]) {
+    try { fetched = Math.max(fetched, statSync(join(gd, f)).mtimeMs); } catch {}
+  }
+  if (!fetched) parts.push("never fetched in this clone");
+  else if (now - fetched > LAG_STALE_MS) {
+    const h = Math.round((now - fetched) / 3600e3);
+    parts.push(`last fetched ${h >= 48 ? `${Math.round(h / 24)} days` : `${h} hours`} ago`);
+  }
+  if (up) {
+    const n = count(`HEAD..${up}`);
+    if (n) parts.push(`${n} commit${n === 1 ? "" : "s"} behind "${up}"`);
+  }
+  if (def && branch !== def.replace(/^origin\//, "")) {
+    const n = count(`HEAD..${def}`);
+    parts.push(`on branch ${branch ? `"${branch}"` : "(detached)"}, not "${def}"${n ? ` (${n} commit${n === 1 ? "" : "s"} behind it)` : ""}`);
+  }
+  if (!parts.length) return "";
+  const ref = def || up;
+  // No ready-to-run command: a .git/config planted by a downloaded archive would run on the model's own fetch (Security F6).
+  return `HarteBurn: the repo at '${root}' is ${parts.join("; ")}. Its files on disk may not be its current state. ` +
+    `Before answering from it, fetch it (or ask the owner to) and read "${ref}" and its unmerged branches, ` +
+    `or say how old your copy is. Never call it stale or complete from this copy.`;
+}
+
+function lag(input, cwd) {
+  const real = (q) => { try { return realpathSync(q); } catch { return q; } };
+  const own = repoRoot(input?.cwd || cwd) || repoRoot(cwd);
+  const ownCommon = own ? real(commonDir(own) || "") : "";
+  const sid = String(input?.session_id || "").replace(/[^A-Za-z0-9_-]/g, "") || "nosession";
+  // Per-user state (never a shared /tmp, Security F4): the session repo's own state dir, else the HarteBurn home.
+  const seenFile = join(ownCommon ? stateDir(ownCommon) : join(homeDir(), "lag"), `lag-${sid}.json`);
+  let seen = [];
+  try { seen = JSON.parse(readFileSync(seenFile, "utf8")); } catch {}
+  if (!Array.isArray(seen)) seen = [];
+  const notes = [];
+  for (const p of lagPaths(input)) {
+    const root = repoOf(p);
+    if (!root) continue;
+    const common = real(commonDir(root) || "");
+    if (!common || common === ownCommon || seen.includes(common)) continue;
+    seen.push(common);
+    const note = lagNote(root);
+    if (note) notes.push(note);
+  }
+  try {
+    mkdirSync(dirname(seenFile), { recursive: true, mode: 0o700 });
+    writeFileSync(seenFile, JSON.stringify(seen.slice(-200)));
+  } catch {}
+  emit("PostToolUse", notes.join("\n"));
+}
+
 /** The open record's touched repos that still exist, and the record's start, for the steward. */
 function touchedRoots(gitDir) {
   try {
@@ -885,6 +1021,9 @@ function main(mode) {
       return;
     case "touch":
       touch(input, cwd);
+      return;
+    case "lag":
+      try { lag(input, cwd); } catch {}
       return;
     case "unlock":
       // PostToolUse(AskUserQuestion): the owner's Unlock question (PRD-RC-SECURITY-11).

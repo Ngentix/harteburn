@@ -31,6 +31,8 @@ export const ALLOW = [
   ".claude-plugin/**", "agents/**", "skills/**", "hooks/**", "scripts/**", "templates/**",
   "ethos.md", "bookends.md", "budgets.json", "README.md", "LICENSE", "CHANGELOG.md", ".gitignore",
   "docs/*.md", "retros/TEMPLATE-retro.md",
+  // The public tree posts its own release notes (jg 2026-11-13); every other workflow stays private.
+  ".github/workflows/release-notes.yml",
 ];
 
 /** Never public, whatever ALLOW or the config says. */

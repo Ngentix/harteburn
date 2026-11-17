@@ -89,7 +89,7 @@ Frame through an approved PRD ≤ 30 min when the design reuses existing mechani
      read-only production read of its setting, before Build, and each new account's one record read
      with its real sign-in (the canary's, or the test account's) before any slice depends on it. A
      setting that is off is a found row, its fix an owner act on Yours.
-   - **A new provider** (the record's `providers`, set at Frame) widens Ready to 60 min: one real sign-in, list and write per Done-line resource, through the project's own local client, each reply's shape in `live_reads`, before Slices prices a piece (the board refuses Slices without them). The write goes only to a test or sandbox account the owner names, before the write, in a message of their own: `test account <provider>: <account>` (ask on Yours); never a customer's or production account.
+   - **A new provider** (the record's `providers`, set at Frame) widens Ready to 60 min: one real sign-in, list and write per Done-line resource, through the project's own local client, each reply's shape in `live_reads`, before Slices prices a piece (the board refuses Slices without them). The write goes only to a test or sandbox account the owner names, before the write, in a message of their own (`test account <provider>: <account>`) or a click; never a customer's or production account.
    - **The load-bearing design**: the Architect names the one part that is (a new mechanism, a
      changed contract). Only that part goes through the full PRD panel; the rest goes to the owner
      with the Prover's derived tests.
@@ -97,7 +97,7 @@ Frame through an approved PRD ≤ 30 min when the design reuses existing mechani
      exactly its case, or is marked an estimate (`measured`; the board refuses neither by Slices' end).
    - **Rules hold**: the Architect's charter, "At Ready" (15 min).
 4. **Slices (Tech Lead, the Lead's pricing if bundled).** **Number the pieces** 1..N in `pieces`,
-   quick win first, each with its production `check`, its `price` (build minutes: the Lead's "A
+   quick win first, each with its `check`, proven and demoed locally (no step waits on a push or deploy; production is read once, at the bundled release), its `price` (build minutes: the Lead's "A
    price is the build") and its `timebox`. **The Prover's Mode 0** runs on the Done lines now: any line
    it returns as "cannot pass in this objective" is cut or reshaped with Product and the owner
    before Build. **A find while building** gets Product's triage, one of three answers: a fix inside

@@ -315,7 +315,9 @@ export function fixtureSources(added) {
     if (!TEST_FILE.test(file)) continue;
     let run = 0;
     const data = lines.some((l) => (run = FIELD_LINE.test(l) ? run + 1 : 0) >= 3 || (l.match(INLINE_FIELD) || []).length >= 3);
-    if (data) out.push({ file, tag: tag ?? null });
+    // A byte-faithful fixture (JSON the app wrote) can't hold a comment: a note
+    // in another added line that names it counts, as for fixtures/ (jg 2026-11-15).
+    if (data) out.push({ file, tag: tag ?? allTags.find((l) => l.includes(basename(file))) ?? null });
   }
   return out;
 }
@@ -540,7 +542,7 @@ if (mode === "before") {
 
 const task =
   mode === "before"
-    ? "Mode 1 (before the build): turn every walkthrough step into a failing test, run each, and confirm it fails for the right reason. Report one line per step."
+    ? "Mode 1 (before the build): turn every walkthrough step into a failing test, run each, and confirm it fails for the right reason. An abuse-case Done line gets an attack test that runs where its defence runs (a CI step, a scanner rule, a script), not only in the product's test framework, red on HEAD. Run that defence locally in the warm worktree (the CI step's own command, the scanner with the repo's config); never push to trigger it. Report one line per step."
     : "Mode 2 (after the build): give one verdict on this change against the walkthrough: **proven**; **defect** (the code does not do a step: the only verdict that blocks); or **proven, gaps to pin** (the code is right, but a test stays green with its guard gone: list each, the builder pins it, no re-pass). Run the Readers and callers list once, each with its gate command, before your verdict. Test names, a red-on-removal, and the screen for anything a person sees. Sweep every guard your steps depend on and list every survivor, not only the first red; when two or more share a cause, name the class and its structural fix. Tag each find `regression of this diff? y/n`, measured against the diff's base (y: the base did not do it). A classifier or filter change carries a before/after count over every real input set it touches, each lost member named; a \"conforms\" without it is a defect." +
       (round > 1 ? ` This is round ${round}, after a defect: the brief carries the earlier verdict, and the diff runs only from the commit that round tested.` : "");
 

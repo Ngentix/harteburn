@@ -423,7 +423,8 @@ test("spawned with a pushed range, the gate judges the pushed commit; without on
   const pushed = run(["--test", "--test-reporter=spec", "scripts/__tests__/brief.test.mjs"], `${c1}..${c2}`);
   assert.notEqual(pushed.status, 0, "the pushed commit's brief is stale");
   assert.match(pushed.stdout, /stale — docs\/architecture\/01-a\.md changed .*\(at /);
-  const tree = run(["--test", "scripts/__tests__/brief.test.mjs"]);
+  // TAP named outright: newer Node prints spec even to a pipe, and the "# pass" count below is TAP's.
+  const tree = run(["--test", "--test-reporter=tap", "scripts/__tests__/brief.test.mjs"]);
   assert.equal(tree.status, 0, "the tree's brief is current");
   assert.match(tree.stdout, /# pass [1-9]/, "and the child really ran its tests");
   assert.equal(run(["scripts/brief-stamp.mjs", "--check", `${c1}..${c2}`]).status, 1, "the CLI judges a range's tip");
@@ -463,7 +464,7 @@ test("its throwaway repos never touch a repository a hook's GIT_DIR names", { sk
   const before = state();
   // NODE_TEST_CONTEXT marks a test runner's own child; a nested run that keeps it runs nothing.
   const { NODE_TEST_CONTEXT, ...env } = process.env;
-  const run = spawnSync(process.execPath, ["--test", fileURLToPath(import.meta.url)], {
+  const run = spawnSync(process.execPath, ["--test", "--test-reporter=tap", fileURLToPath(import.meta.url)], {
     encoding: "utf8",
     env: { ...env, GIT_DIR: join(decoy, ".git"), HARTEBURN_DECOY_CHILD: "1" },
   });

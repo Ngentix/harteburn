@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.28.4 — 2026-11-16
+
+**You name a test account with a click, and an attack test runs wherever its defence runs, on your machine.**
+- **A test account is a click.** When a live write needs a provider's test or sandbox account, the board's refusal gives the builder one question to ask you, naming the provider and the account. You click **Test account** or **Not a test account**. A typed `test account <provider>: <account>` still counts, and now works for a provider whose name has a space ("Cloudflare R2"). Your latest answer stands, typed or clicked. Before you are asked, the provider must be a short name (letters, digits, spaces, "." and "-", at most 40 characters) and the account one word with no space or quote; otherwise the refusal tells the builder to rename them.
+- **An attack test runs wherever the defence runs.** For each abuse case among the Done lines, the Prover's first tests include an attack test in whatever holds that defence: a CI step, a scanner rule or a script, not only the product's own tests. It fails before the build. The Prover runs that defence on your machine, with the CI step's own command or the scanner with your repo's config, and never pushes a branch to make CI run it.
+- **A copied fixture under `tests/` is accepted with a note.** A data file under `tests/` that cannot hold a comment, such as JSON copied byte for byte from the app, is accepted when another line the change adds carries its source note (`fixture: production <the read>` or `fixture: made up, because <why>`) and names the file, as files in `fixtures/` already were.
+- **Coming from 0.26.x?** The push gate went away in 0.27.0. Update the plugin (`claude plugin update harteburn@ngentix`) and close every session that started before the update. Then start one new session in each repo where 0.26.x put its pre-push check; that session removes it. If git runs hooks from another folder, or the hook is a symlink, the session prints one line saying what to remove by hand.
+
+## 0.28.3 — 2026-11-13
+
+**HarteBurn warns before it answers from a stale copy of another repo, and each published release now announces itself.**
+- **A stale copy is named before it is trusted.** When a session reads another repo's local checkout, HarteBurn says once if that copy was last fetched over 6 hours ago, is behind its remote, or is off its default branch, and asks you to fetch or say how old the copy is. It never fetches by itself, and its git calls cannot reach the network.
+- **The board leads with untold finds.** A find is told to the owner before anyone works on it: the board shows untold finds first, and refuses to move one into doing until it has been told.
+- **Proof stays local.** A piece is proven and demoed on your machine, with no step waiting on a deploy. At Ready the Architect names a local stand-in for every provider, secret and job, and a Done line whose only proof is production comes back.
+- **Release notes go out with each release.** If you publish HarteBurn with `scripts/publish.mjs`, the published repo gets `.github/workflows/release-notes.yml`: when a release reaches its `main`, it posts one Slack message, "HarteBurn <version> published", naming every version since the last publish, newest first, with how to update. It needs the repo secret `CI_SLACK_WEBHOOK`; without one, the post is refused in the run's log and nothing else changes.
+
 ## 0.28.2 — 2026-11-09
 
 **A new key locks a leaked key out, and publish catches a customer name in full-width letters, with accents or split by invisible characters.** Two kinds of fix: for anyone who publishes with `scripts/publish.mjs`, and for a Team on the hosted service.

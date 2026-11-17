@@ -1,19 +1,24 @@
 #!/usr/bin/env node
-// HarteBurn's releases to the dev channel (rc-slack, jg 2026-10-28): every version that reaches main
-// posts its CHANGELOG section to Slack, ending with how to update.
+// HarteBurn's release notes to the dev channel (rc-slack, jg 2026-10-28; public posts jg 2026-11-13).
 //
-//   node scripts/release-notes.mjs <version> [--dry-run]       post one version's notes (needs SLACK_WEBHOOK)
-//   node scripts/release-notes.mjs --since <sha> [--dry-run]   post each version a push released, oldest first
+//   node scripts/release-notes.mjs <version> [--public] [--dry-run]       post one version's notes (needs SLACK_WEBHOOK)
+//   node scripts/release-notes.mjs --since <sha> [--public] [--dry-run]   post what a push released
 //
 // A release is a push to main that changes .claude-plugin/plugin.json's version (no tags); the notes
-// are that version's "## <version>" section of CHANGELOG.md. Prior art: connector-cloud's
-// scripts/release-notes.mjs (its escaping and bullets). Nothing is deployed, so a post says
-// "released", never "verified". `--dry-run` prints each payload as one JSON line and posts nothing.
+// are that version's "## <version>" section of CHANGELOG.md.
+//   - The private tree (no --public): one post per version, "built (not yet public)", no update line:
+//     a user cannot install it until it is published.
+//   - The public tree (--public, the workflow passes it there): one post, "published", holding every
+//     CHANGELOG section after the version the public tree held before the push, newest first, then the
+//     update line. A publish can skip versions; each one it carries is named.
+// Nothing is deployed, so a post never says "verified". `--dry-run` prints each payload as one JSON
+// line and posts nothing.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { markers } from "./publish.mjs";
 
 export const UPDATE = "Update: claude plugin update harteburn@ngentix, then reload";
 const PLUGIN_JSON = ".claude-plugin/plugin.json";
@@ -32,14 +37,56 @@ export function section(changelog, version) {
   if (start < 0) return "";
   let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
   if (end < 0) end = lines.length;
-  return lines.slice(start + 1, end).join("\n").trim();
+  // A <!-- private --> block never posts, and a <!-- public … --> block posts unwrapped, as publish does
+  // (Security F2, 2026-11-13); a section whose markers do not pair posts no notes rather than a guess.
+  const kept = markers(lines.slice(start + 1, end).map((text, i) => ({ text, n: start + 2 + i })));
+  if (kept.error) return "";
+  return kept.lines.map((l) => l.text).join("\n").trim();
 }
 
-/** The Slack text for one version. */
+/** The Slack text for one private build: not installable until it is published, so no update line. */
 export function slackText(version, changelog) {
   const notes = section(changelog, version);
-  const head = `*HarteBurn ${escapeSlack(version)}* released`;
-  return notes ? `${head}\n${mrkdwn(notes)}\n\n${UPDATE}` : `${head} (the changelog has no notes for ${escapeSlack(version)})\n\n${UPDATE}`;
+  const head = `*HarteBurn ${escapeSlack(version)}* built (not yet public)`;
+  return notes ? `${head}\n${mrkdwn(notes)}` : `${head} (the changelog has no notes for ${escapeSlack(version)})`;
+}
+
+/** -1, 0 or 1 for two x.y.z versions; a part that is not a number counts as 0. */
+export function compareVersions(a, b) {
+  const pa = String(a).split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/** The CHANGELOG's versions after `before` up to and including `head`, newest first; `head` alone when `before` is ''. */
+export function versionsBetween(changelog, before, head) {
+  if (!head) return [];
+  if (!before) return [head];
+  const all = (changelog || "").split("\n").filter((l) => l.startsWith("## ")).map((l) => l.slice(3).split(/\s/)[0]);
+  const out = [];
+  for (const v of all) if (compareVersions(v, before) > 0 && compareVersions(v, head) <= 0 && !out.includes(v)) out.push(v);
+  if (!out.includes(head)) out.unshift(head);
+  return out.sort((x, y) => compareVersions(y, x));
+}
+
+/** The Slack text for one public release: every version it carries, newest first, then how to update. */
+export function publicText(versions, changelog) {
+  const [head] = versions;
+  const title = `*HarteBurn ${escapeSlack(head)}* published`;
+  if (versions.length === 1) {
+    const notes = section(changelog, head);
+    return notes ? `${title}\n${mrkdwn(notes)}\n\n${UPDATE}` : `${title} (the changelog has no notes for ${escapeSlack(head)})\n\n${UPDATE}`;
+  }
+  const parts = versions.map((v) => {
+    const notes = section(changelog, v);
+    return `*${escapeSlack(v)}*\n${notes ? mrkdwn(notes) : "(the changelog has no notes for this version)"}`;
+  });
+  const oldest = versions[versions.length - 1];
+  return `${title}, with every version since the last publish (${escapeSlack(oldest)} to ${escapeSlack(head)})\n\n${parts.join("\n\n")}\n\n${UPDATE}`;
 }
 
 const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
@@ -51,6 +98,18 @@ function versionAt(cwd, rev) {
   } catch {
     return "";
   }
+}
+
+/** The public tree's release from `since` to HEAD: the versions it carries, newest first ([] when the version did not change). */
+export function publishedSince(cwd, since, changelog) {
+  const head = versionAt(cwd, "HEAD");
+  let before = "";
+  try {
+    git(cwd, "cat-file", "-e", `${since}^{commit}`);
+    before = versionAt(cwd, since);
+  } catch {}
+  if (!head || head === before) return [];
+  return versionsBetween(changelog, before, head);
 }
 
 /**
@@ -98,25 +157,26 @@ const isMain = () => {
 if (process.argv[1] && isMain()) {
   const args = process.argv.slice(2);
   const dry = args.includes("--dry-run");
-  const rest = args.filter((a) => a !== "--dry-run");
+  const pub = args.includes("--public");
+  const rest = args.filter((a) => a !== "--dry-run" && a !== "--public");
   const cwd = process.cwd();
-  let versions;
-  if (rest[0] === "--since") {
-    if (!rest[1]) {
-      console.error("usage: node scripts/release-notes.mjs --since <sha> [--dry-run]");
-      process.exit(2);
-    }
-    versions = releasedSince(cwd, rest[1]);
-  } else if (rest[0]) versions = [rest[0]];
-  else {
-    console.error("usage: node scripts/release-notes.mjs <version> | --since <sha> [--dry-run]");
-    process.exit(2);
-  }
   let changelog = "";
   try {
     changelog = readFileSync(join(cwd, "CHANGELOG.md"), "utf8");
   } catch {}
-  const texts = versions.map((v) => [v, slackText(v, changelog)]);
+  let versions;
+  if (rest[0] === "--since") {
+    if (!rest[1]) {
+      console.error("usage: node scripts/release-notes.mjs --since <sha> [--public] [--dry-run]");
+      process.exit(2);
+    }
+    versions = pub ? publishedSince(cwd, rest[1], changelog) : releasedSince(cwd, rest[1]);
+  } else if (rest[0]) versions = [rest[0]];
+  else {
+    console.error("usage: node scripts/release-notes.mjs <version> | --since <sha> [--public] [--dry-run]");
+    process.exit(2);
+  }
+  const texts = pub ? (versions.length ? [[versions[0], publicText(versions, changelog)]] : []) : versions.map((v) => [v, slackText(v, changelog)]);
   if (dry) {
     for (const [, text] of texts) console.log(JSON.stringify({ text }));
     process.exit(0);

@@ -58,6 +58,7 @@ The modes `push` and `prepush-install` are no-ops, for a session whose hooks.jso
 |---|---|
 | `accept piece <n>: <the finding>` | `event: "accept"`, `piece`, `text`, and on a license with seats, `seats` |
 | `test account <provider>: <account>` | `event: "account"`, `provider`, `account` |
+| A click on `accountQuestion` (PostToolUse AskUserQuestion) | `event: "account"`, `via: "dialog"`, `board`, `provider`, `account`, `tool_use_id` |
 | `go piece <n>:` | `event: "go"`, `piece`, `seats` (the seats the license verified) |
 
 A typed row counts only when that transcript shows the owner typed the line; an agent's words never count. The ledger lives inside `.git`, so it is never committed and never dirties the tree.
@@ -162,7 +163,7 @@ When a sweep removes something under always, the reminder says "Steward removed 
 
 ## Where releases are announced
 
-Each HarteBurn version that reaches `main` is announced in the **#dev** Slack channel: a push that bumps the version (`.claude-plugin/plugin.json`) runs `.github/workflows/release-notes.yml`, which posts that version's `CHANGELOG.md` section ("HarteBurn 0.x.y released", the headline, its items) and how to update (`claude plugin update harteburn@ngentix`, then reload). One post per version; a push that changes no version posts nothing. The webhook is the repo secret `CI_SLACK_WEBHOOK`; a refused post shows in the run's log only. `node scripts/release-notes.mjs <version> --dry-run` prints the post.
+Each HarteBurn version that reaches `main` is announced in the **#dev** Slack channel: a push that bumps the version (`.claude-plugin/plugin.json`) runs `.github/workflows/release-notes.yml`, which posts the `CHANGELOG.md` notes. The workflow is published with the plugin, so it runs in both repos. In the private development repo each version posts once, "HarteBurn 0.x.y built (not yet public)", with no update line, because nobody can install it yet. In the public repo (Ngentix/harteburn) a publish posts once, "HarteBurn 0.x.y published", with every version since the last publish (newest first) and how to update (`claude plugin update harteburn@ngentix`, then reload). A push that changes no version posts nothing. The webhook is each repo's secret `CI_SLACK_WEBHOOK`; a refused post shows in the run's log only. `node scripts/release-notes.mjs <version> --dry-run` prints the private post; add `--public` for the public one.
 
 ## What a fresh session shows
 

@@ -38,9 +38,9 @@ Never propose a hand-listed denylist or name ratchet where a compiler or permiss
 
 ## At Ready (rules hold, 15 min)
 
-For each brief rule on the paths the objective touches: its enforcing test (`file:line`), or "unenforced". Read the code behind each unenforced rule and log every break as a found row before Build. For each Done line, name the production artifact it depends on (an image stage, a job's arguments) and the rehearsal that proves it.
+For each brief rule on the paths the objective touches: its enforcing test (`file:line`), or "unenforced". Read the code behind each unenforced rule and log every break as a found row before Build. For each Done line, name the production artifact it depends on (an image stage, a job's arguments) and the rehearsal that proves it. Name the local stand-in for every provider, secret and job each piece touches; none is built after Ready.
 
-**A new provider, at Ready (60 min)**: one real sign-in, list and write per Done-line resource, through the project's own local client, each reply's shape logged in the record's `live_reads`, before Slices prices a piece. The write goes only to a test or sandbox account the owner names, before the write, in a message of their own (`test account <provider>: <account>`), never a customer's or production account.
+**A new provider, at Ready (60 min)**: one real sign-in, list and write per Done-line resource, through the project's own local client, each reply's shape in `live_reads`, before Slices prices a piece. The write goes only to a test or sandbox account the owner names, before the write, in a message of their own (`test account <provider>: <account>`) or a click, never a customer's or production account.
 
 **Each new screen, at Ready**: one line per screen the piece adds or changes — every link on it and the credential that link needs (a session cookie's path, a key), its help topic, and what ends its session (expiry, sign-out, a revoked credential). The project carries a link-crawl test (the plugin's `templates/scripts/link-crawl.mjs`): every local link on every signed-in page opens.
 

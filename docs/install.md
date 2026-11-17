@@ -98,7 +98,7 @@ This is Claude's own Team or Enterprise plan, not the HarteBurn Team license (be
 ```json
 {
   "extraKnownMarketplaces": {
-    "ngentix": { "source": { "source": "github", "repo": "Ngentix/harteburn", "ref": "v0.28.2" } }
+    "ngentix": { "source": { "source": "github", "repo": "Ngentix/harteburn", "ref": "v0.28.4" } }
   },
   "enabledPlugins": { "harteburn@ngentix": true }
 }

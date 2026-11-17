@@ -22,7 +22,7 @@ import { join, isAbsolute, relative, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { BEATS, STATE_WORD, OPEN, FINISHED, normalize, doneOrder, beatMinutes, currentTimebox, assignIds, slugOf, refusals, runsFromLedger, applyStamps, heldToRules, LIVE_RULES_FROM, deferredRegression, triageRefusals } from "./board-schema.mjs";
+import { BEATS, STATE_WORD, OPEN, FINISHED, untold, normalize, doneOrder, beatMinutes, currentTimebox, assignIds, slugOf, refusals, runsFromLedger, applyStamps, heldToRules, LIVE_RULES_FROM, deferredRegression, triageRefusals } from "./board-schema.mjs";
 import { securityCheck, sessionFiles, headOf, SAFE, namedAccounts, isSecurity } from "./board-security.mjs";
 import { seatGate } from "./seat-gate.mjs";
 import { homeFlag } from "./login.mjs";
@@ -101,6 +101,9 @@ export function boardMarkdown(o, now = Date.now(), extra = {}) {
     out.push(`⛔ **The board refuses this record: ${n} problem${n > 1 ? "s" : ""}. Put ${n > 1 ? "them" : "it"} right first.**`, ...extra.warnings.map((w) => `- ${w}`), "");
   }
   if (extra.notes?.length) out.push(...extra.notes.map((w) => `⚠ ${w}`), "");
+  // Retro receipts-s1 (jg ratified Change 3, 2026-11-07): finds the owner has not been told lead the page.
+  const notTold = (o.items || []).filter(untold);
+  if (notTold.length) out.push(`📣 **Found, not yet told to the owner (${notTold.length}):**`, ...notTold.map((i) => `- ${String(i.text || "").replace(/^\s*found\s*:\s*/i, "")}`), "");
 
   // The numbered work list leads with what remains, doing first; finished items go to the
   // board's foot (jg 2026-10-22: "I need to see the full list of what remains"). Each keeps its number.

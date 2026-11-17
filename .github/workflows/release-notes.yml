@@ -1,0 +1,31 @@
+name: Release notes
+
+# Each HarteBurn version that reaches main posts its CHANGELOG notes to the dev channel. A release is a
+# push that changes plugin.json's version; there are no tags. This file is published with the plugin,
+# so it runs in both trees: the private tree posts "built (not yet public)", the public tree
+# (Ngentix/harteburn) posts "published" with every version since its last publish. A refused post
+# (Slack 429/5xx, or no secret yet) shows in this run's log only and never turns the run red.
+
+on:
+  push:
+    branches: [main]
+    paths: [.claude-plugin/plugin.json]
+
+permissions:
+  contents: read
+
+jobs:
+  release-notes:
+    name: Release notes to the dev channel
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Post each version this push released
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.CI_SLACK_WEBHOOK }}
+          PUBLIC: ${{ github.repository == 'Ngentix/harteburn' && '--public' || '' }}
+        run: node scripts/release-notes.mjs --since "${{ github.event.before }}" $PUBLIC

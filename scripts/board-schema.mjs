@@ -12,6 +12,7 @@ import { randomBytes } from "node:crypto";
 import { seatSnapshot } from "./seats.mjs";
 import { roleOf } from "./paths.mjs";
 import { markdownTables } from "./walkthrough.mjs";
+import { accountQuestion, ACCOUNT_NAME, PROVIDER_NAME, ACCOUNT_HEADER, ACCOUNT_OPTIONS, ACCOUNT_DESCRIPTIONS } from "../hooks/harteburn-hook.mjs";
 
 /** [key, label, default timebox in minutes]. `prd` shows in the beat line only when the record has it. */
 export const BEATS = [
@@ -55,7 +56,7 @@ export const KEYS = {
   // item waits on ("grant CI read on the ghcr.io copies"); the board refuses it with no Yours line.
   // `regression` "y" | "n" (retro 2026-10-28, connector-cloud FEA-CC-456, jg ratified Change 2): the
   // Prover's tag, did this diff make it (measured against the diff's base).
-  item: ["id", "beat", "text", "state", "note", "kind", "owner_act", "regression"],
+  item: ["id", "beat", "text", "state", "note", "kind", "owner_act", "regression", "told"],
   // `kind` "prod-fix": a production fix, its own piece, released at once, never riding a feature
   // piece. `replans`: [{at: "<who> <YYYY-MM-DD>", price, why, text?}], the owner's re-price, split
   // or re-scope of a started piece (retro 2026-10-25, jg ratified Change 1).
@@ -109,6 +110,13 @@ export const BEAT_RULES_FROM = "2026-10-29";
  * what it holds back. A filter dropped 21 correct members and was deferred as "no worse than prod";
  * a provider met only by discovery ran Build 2,319 of 930 min. */
 export const LIVE_RULES_FROM = "2026-10-31";
+/** A find (a `found` row, or one whose text starts "Found:"). Retro receipts-s1 2026-11-07 (jg
+ *  ratified Change 3): asked to fix one deploy bug, the session worked three other finds in turn
+ *  without saying so, and jg asked why it was "excessively slow". A find is told to the owner in one
+ *  line before it is worked: `told` holds when. Records opened from TOLD_RULES_FROM. */
+export const TOLD_RULES_FROM = "2026-11-08";
+export const isFind = (i) => i?.kind === "found" || /^\s*found\s*:/i.test(String(i?.text || ""));
+export const untold = (i) => isFind(i) && OPEN.includes(i?.state) && !String(i?.told || "").trim();
 export const READY_PROVIDER_MIN = 60;
 export const LIVE_CALLS = ["sign-in", "list", "write"];
 const HOLDS_BACK = /\S.*\bby ~\d+(\.\d+)?\s*h\b/;
@@ -327,6 +335,7 @@ export function refusals(rec, now = Date.now(), { stamps, ledger, accounts = [] 
       if (i.regression != null && !["y", "n"].includes(i.regression)) out.push(`${what} has regression "${i.regression}": "y" or "n", the Prover's tag (did this diff make it, measured against the diff's base)`);
       else if (i.regression == null && i.kind === "found" && OPEN.includes(i.state)) out.push(`${what} is a find with no regression tag: add "regression": "y" or "n" (did this diff make it, measured against the diff's base)`);
       if (deferredRegression(i)) out.push(`${what} is a regression of this diff: set its state to todo or doing and fix it inside its piece; it is never dropped or blocked`);
+      if (String(stamps?.opened_at ?? rec.opened_at ?? "").slice(0, 10) >= TOLD_RULES_FROM && i.state === "doing" && untold(i)) out.push(`${what} is a find being worked before the owner was told: say it in one line (what, and fix now or after the ask), then set "told": "<YYYY-MM-DD HH:MM>"`);
     }
     const providers = (Array.isArray(rec.providers) ? rec.providers : []).filter((p) => String(p || "").trim());
     const readyBeat = (rec.beats || []).find((b) => b.key === "ready");
@@ -347,7 +356,8 @@ export function refusals(rec, now = Date.now(), { stamps, ledger, accounts = [] 
           const acct = String(r?.account || "").trim();
           const named = (accounts || []).some((a) => a?.provider === p && String(a?.account || "") === acct);
           if (!acct || !named) {
-            out.push(`Provider "${p}"'s live write ${acct ? `went to "${acct}", an account the owner has not named` : "names no account"}: a live write goes only to a test or sandbox account the owner names before the write, by sending alone in one message "test account ${p}: <account>", never a customer's or production account; ask the owner on Yours, then write its "account"`);
+            // Retro 2026-11-15 Change 1 (jg 2026-11-16): the owner answers a question by a click, never retypes a line.
+            out.push(`Provider "${p}"'s live write ${acct ? `went to "${acct}", an account the owner has not named` : "names no account"}: a live write goes only to a test or sandbox account the owner names, never a customer's or production account; ${acct && !(PROVIDER_NAME.test(p) && ACCOUNT_NAME.test(acct)) ? `the provider and account must be plain names before the owner is asked (provider: letters, digits, spaces, "." and "-", at most 40; account: one token, no space, quote or format character): rename them in "providers" and the write's "account"` : acct ? `ask the owner this question (AskUserQuestion), with no other text:\nquestion: ${accountQuestion(rec.id, p, acct)}\nheader: ${ACCOUNT_HEADER}\noptions: ${ACCOUNT_OPTIONS.join(" / ")}\ndescriptions: ${ACCOUNT_DESCRIPTIONS.map((d) => `"${d}"`).join(" / ")}` : `ask the owner which test account, write it as the write's "account", then ask the question this refusal then shows`}`);
           }
         }
       }

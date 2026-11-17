@@ -15,7 +15,7 @@ import { GIT, gitEnv } from "./git-safe.mjs";
 import { createHash } from "node:crypto";
 import { parsePathTable, globRe } from "./globs.mjs";
 import { ledgerId, heldToRules, DONE_RULES_FROM } from "./board-schema.mjs";
-import { finalReply, LOCAL_FILES_HEAD, TEST_ACCOUNT, unlockQuestion, UNLOCK_HEADER, UNLOCK_OPTIONS, UNLOCK_DESCRIPTIONS, acceptQuestion, ACCEPT_FORM, ACCEPT_HEADER, ACCEPT_OPTIONS, ACCEPT_DESCRIPTIONS } from "../hooks/harteburn-hook.mjs";
+import { finalReply, LOCAL_FILES_HEAD, TEST_ACCOUNT, accountQuestion, ACCOUNT_NAME, PROVIDER_NAME, ACCOUNT_HEADER, ACCOUNT_OPTIONS, ACCOUNT_DESCRIPTIONS, unlockQuestion, UNLOCK_HEADER, UNLOCK_OPTIONS, UNLOCK_DESCRIPTIONS, acceptQuestion, ACCEPT_FORM, ACCEPT_HEADER, ACCEPT_OPTIONS, ACCEPT_DESCRIPTIONS } from "../hooks/harteburn-hook.mjs";
 export { unlockQuestion, UNLOCK_HEADER, UNLOCK_OPTIONS, UNLOCK_DESCRIPTIONS, acceptQuestion, ACCEPT_HEADER, ACCEPT_OPTIONS, ACCEPT_DESCRIPTIONS };
 // A typed "accept piece n:" line counts only when typed before this (PRD-RC-SECURITY-14): from then on
 // the owner accepts by a click on acceptQuestion. Earlier typed lines keep counting (jg 2026-11-05).
@@ -813,18 +813,32 @@ export function ownerTypedLines(root, transcript, env = process.env) {
  */
 export function namedAccounts(root, id, ledger, { env = process.env, since = "" } = {}) {
   const projects = projectsDir(env);
-  const said = new Map();
+  const said = new Map(), parsed = new Map();
   const out = [];
+  // A click (retro 2026-11-15 Change 1): the owner's latest answer per account stands, read as Claude Code
+  // wrote it on the fixed question built here from the row's fields, so a row only points.
+  // The owner's latest answer per account stands across both paths, typed and clicked: a "Not a test account"
+  // click after a typed naming un-names it (Security F1 on Change 1).
+  const clicks = new Map();
   for (const row of ledger || []) {
-    if (row?.event !== "account" || row.board !== id || !row.provider || !row.account || !inside(projects, String(row.transcript || ""))) continue;
+    if (row?.event !== "account" || row.via !== "dialog" || row.board !== id || !PROVIDER_NAME.test(String(row.provider || "")) || !ACCOUNT_NAME.test(String(row.account || ""))) continue;
+    const form = { question: accountQuestion(id, row.provider, row.account), header: ACCOUNT_HEADER, options: ACCOUNT_OPTIONS, descriptions: ACCOUNT_DESCRIPTIONS };
+    const c = clicked(root, row, form, env, parsed);
+    const key = `${row.provider}\0${row.account}`;
+    if (c && String(c.ts) >= String(since) && (!clicks.has(key) || c.ts > clicks.get(key).ts)) clicks.set(key, { provider: row.provider, account: row.account, ...c });
+  }
+  for (const row of ledger || []) {
+    if (row?.event !== "account" || row.via === "dialog" || row.board !== id || !row.provider || !row.account || !inside(projects, String(row.transcript || ""))) continue;
     try {
       // The typed line read as the hook reads it, then compared exactly: no pattern built from the row.
       const says = (t) => { const m = TEST_ACCOUNT.exec(t.text); return m && m[1] === row.provider && m[2] === row.account; };
       const typed = typedLines(root, row.transcript, said).filter(says).map((t) => t.ts).sort().pop();
       // Typed after the record opened (`since`, the board's own stamp): an earlier objective's naming is not this one's.
-      if (typed && String(typed) >= String(since)) out.push({ provider: row.provider, account: row.account, ts: typed });
+      const key = `${row.provider}\0${row.account}`;
+      if (typed && String(typed) >= String(since) && (!clicks.has(key) || typed > clicks.get(key).ts)) clicks.set(key, { provider: row.provider, account: row.account, ts: typed, word: ACCOUNT_OPTIONS[0] });
     } catch {}
   }
+  for (const c of clicks.values()) if (c.word === ACCOUNT_OPTIONS[0]) out.push({ provider: c.provider, account: c.account, ts: c.ts });
   return out;
 }
 
